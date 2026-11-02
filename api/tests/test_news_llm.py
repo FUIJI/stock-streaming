@@ -102,3 +102,20 @@ async def test_http_errors_stop_the_one_by_one_retries_too():
     bad_key = FakeGemini(httpx.Response(400, text="API key not valid"))
     result = await analyze(bad_key.provider(), ITEMS, NAMES)
     assert result.calls == 1 and not result.failed[2].retryable  # no per-article retries
+
+
+async def test_thinking_level_is_only_sent_to_gemini_models():
+    fake = FakeGemini(gemini_reply({"items": [item_json(1, "AAPL")]}))
+    gemma = GeminiProvider("k", "gemma-4-26b-a4b-it", thinking_level="low",
+                           transport=httpx.MockTransport(fake.handler))
+    await analyze(gemma, ITEMS[:1], NAMES)
+    assert "thinkingConfig" not in json.loads(fake.requests[0].content)["generationConfig"]
+
+
+async def test_network_errors_name_their_type():
+    def timeout(request):
+        raise httpx.ReadTimeout("", request=request)
+
+    result = await analyze(FakeGemini(timeout).provider(), ITEMS[:1], NAMES)
+    message = str(result.failed[1])
+    assert "ReadTimeout" in message and "after" in message and result.failed[1].retryable
