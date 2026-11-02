@@ -33,6 +33,9 @@ ingestion (`TRADE_SINK=api`) → api WS `/internal/ingest` (`TRADE_FEED=ingest`,
 - `make logs`, `make ps`, `make topics`, `make psql`
 - Tests per service: `cd <service> && uv run pytest`; Spark tests run in-container:
   `docker compose run --rm --no-deps --entrypoint python3 spark-ohlcv -m pytest tests/ -q`
+- Frontend: `cd frontend && npm test` (node:test on `src/**/*.test.ts`; keep `src/lib/` free of the
+  `@/` alias so Node can run it) · `npx tsc --noEmit` · `npm run build`. Colors are CSS tokens in
+  `globals.css` (light default, `html[data-theme="dark"]`); the chart reads them too.
 - Lite stack: `make lite-up` / `make lite-down` / `make lite-logs`; `make backfill DAYS=5` (Alpaca)
 - No `make` on this machine? Use `docker compose up -d --build` etc. directly.
 - Production (Oracle VM): `.github/workflows/deploy.yml` deploys on green CI on `master`;
