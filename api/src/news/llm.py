@@ -37,7 +37,7 @@ class GeminiProvider:
 
     def __init__(self, api_key: str, model: str, temperature: float | None = None,
                  thinking_level: str | None = None, base_url: str = GEMINI_URL,
-                 transport: httpx.AsyncBaseTransport | None = None, timeout: float = 90):
+                 transport: httpx.AsyncBaseTransport | None = None, timeout: float = 300):
         self.model = model
         self._temperature = temperature
         # Only Gemini models take a thinking level; Gemma rejects it with a 400.
@@ -95,6 +95,7 @@ def provider_from_env() -> LLMProvider | None:
             temperature=float(temperature) if temperature else None,
             thinking_level=os.environ.get("LLM_THINKING_LEVEL", "low") or None,
             base_url=os.environ.get("GEMINI_BASE_URL", GEMINI_URL),
-            timeout=float(os.environ.get("LLM_TIMEOUT_SEC", "90")),
+            # Gemma on the free tier took ~30s per article: leave room for a batch.
+            timeout=float(os.environ.get("LLM_TIMEOUT_SEC", "300")),
         )
     raise RuntimeError(f"Unknown LLM_PROVIDER: {name!r} (expected gemini|off)")

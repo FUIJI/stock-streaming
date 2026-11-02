@@ -129,6 +129,8 @@ def test_extract_json_unwraps_markdown_fences():
     assert extract_json(f"```json\n{doc}\n```") == doc
     assert extract_json(f"```\n{doc}\n```\n") == doc
     assert extract_json(f"  {doc}  \n") == doc
+    assert extract_json(f"{doc}\n```") == doc  # closing fence only, as Gemma replied
+    assert extract_json(f"```json\n{doc}") == doc
 
 
 async def test_fenced_reply_like_gemmas_is_accepted():
