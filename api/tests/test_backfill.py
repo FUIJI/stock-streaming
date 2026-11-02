@@ -109,3 +109,31 @@ async def test_reconcile_fills_gaps_and_overwrites_live_candles(pg_pool):
     rows = await pg_pool.fetch(
         "SELECT bucket_start, close, volume FROM ohlcv_1m ORDER BY bucket_start")
     assert [(r["close"], r["volume"]) for r in rows] == [(1.5, 300.0), (1.7, 300.0)]
+
+
+async def test_startup_gap_fill_adds_missing_minutes_but_keeps_sip_data(pg_pool, monkeypatch):
+    from src.jobs import gap_fill
+    from src.migrate import migrate
+
+    monkeypatch.setenv("ALPACA_HISTORY_FEED", "sip")
+    await migrate(pg_pool)
+    # 14:30 already reconciled from SIP (full volume); 14:31 missing after downtime.
+    await pg_pool.execute(
+        "INSERT INTO ohlcv_1m VALUES ('AAPL', '2026-11-02T14:30:00Z', 1, 2, 0.5, 1.5,"
+        " 300000, 4000, now())")
+    feeds = {}
+
+    def handler(request):
+        params = request.url.params
+        if request.url.path.startswith("/v2/assets"):
+            return httpx.Response(200, json={"name": "Apple Inc.", "exchange": "NASDAQ"})
+        feeds[params["timeframe"]] = params["feed"]
+        if params["timeframe"] == "1Day":
+            return httpx.Response(200, json={"bars": {"AAPL": []}})
+        iex = [{**BAR, "v": 900}, {**BAR, "t": "2026-11-02T14:31:00Z", "v": 800}]
+        return httpx.Response(200, json={"bars": {"AAPL": iex}})
+
+    await gap_fill(pg_pool, alpaca_with(handler), ["AAPL"], "iex")
+    rows = await pg_pool.fetch("SELECT volume FROM ohlcv_1m ORDER BY bucket_start")
+    assert [r["volume"] for r in rows] == [300000.0, 800.0]  # kept SIP, filled the hole
+    assert feeds == {"1Min": "iex", "1Day": "sip"}  # daily bars always from history
