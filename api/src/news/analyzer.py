@@ -13,14 +13,14 @@ from .prompt import RESPONSE_SCHEMA, SYSTEM_PROMPT, build_user_message
 log = logging.getLogger("api.news.llm")
 
 
-_FENCE = re.compile(r"^\s*```[a-zA-Z]*\s*\n?(.*?)\n?\s*```\s*$", re.DOTALL)
+_OPEN_FENCE = re.compile(r"^```[a-zA-Z]*\s*")
+_CLOSE_FENCE = re.compile(r"\s*```$")
 
 
 def extract_json(text: str) -> str:
-    """The JSON document in a model reply. Some models (seen with Gemma on the VM) wrap
-    it in a markdown fence even when asked for application/json."""
-    match = _FENCE.match(text)
-    return match.group(1) if match else text.strip()
+    """The JSON document in a model reply. Gemma on the VM added markdown fences
+    despite application/json, sometimes only the closing one."""
+    return _CLOSE_FENCE.sub("", _OPEN_FENCE.sub("", text.strip())).strip()
 
 
 @dataclass
