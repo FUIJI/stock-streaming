@@ -22,12 +22,14 @@ from .alpaca import AlpacaClient
 from .backfill import backfill_minutes, history_feed, parse_symbols
 from .db import create_pool
 from .migrate import migrate
+from .symbols import sync_symbol_metadata
 
 log = logging.getLogger("api.jobs")
 
 
 async def reconcile(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[str],
                     days: float, feed: str) -> None:
+    await sync_symbol_metadata(pool, alpaca, symbols)
     await backfill_minutes(pool, alpaca, symbols, days, feed)
 
 

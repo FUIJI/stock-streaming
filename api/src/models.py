@@ -12,3 +12,9 @@ class Candle(BaseModel):
     close: float
     volume: float
     trade_count: int
+
+
+class SymbolInfo(BaseModel):
+    symbol: str
+    name: str | None
+    exchange: str | None

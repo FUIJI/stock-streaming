@@ -15,6 +15,7 @@ from .jobs import run_schedule
 from .market import MarketCalendar
 from .migrate import migrate
 from .quotes import SnapshotCache
+from .symbols import register_symbols
 from .routers import candles, health, market, quotes, stream
 from .routers.stream import TradeBroadcaster, consume_trades
 
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
     app.state.snapshots = (SnapshotCache(app.state.alpaca, os.environ.get("ALPACA_FEED", "iex"))
                            if app.state.alpaca else None)
     app.state.symbols = parse_symbols(os.environ.get("SYMBOLS", "AAPL,MSFT,NVDA,TSLA"))
+    await register_symbols(app.state.pool, app.state.symbols)
     app.state.aggregator = None
     if feed == "kafka":
         task = asyncio.create_task(consume_trades(app.state.broadcaster, app.state.feed))

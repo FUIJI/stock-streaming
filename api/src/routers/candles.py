@@ -5,7 +5,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..db import get_pool
-from ..models import Candle
+from ..models import Candle, SymbolInfo
 
 router = APIRouter()
 
@@ -78,5 +78,12 @@ async def get_candles(
 
 @router.get("/symbols", response_model=list[str])
 async def get_symbols(pool: asyncpg.Pool = Depends(get_pool)) -> list[str]:
-    rows = await pool.fetch("SELECT DISTINCT symbol FROM ohlcv_1m ORDER BY symbol")
+    rows = await pool.fetch("SELECT symbol FROM symbols WHERE active ORDER BY symbol")
     return [row["symbol"] for row in rows]
+
+
+@router.get("/symbols/details", response_model=list[SymbolInfo])
+async def get_symbol_details(pool: asyncpg.Pool = Depends(get_pool)) -> list[SymbolInfo]:
+    rows = await pool.fetch(
+        "SELECT symbol, name, exchange FROM symbols WHERE active ORDER BY symbol")
+    return [SymbolInfo(**dict(row)) for row in rows]
