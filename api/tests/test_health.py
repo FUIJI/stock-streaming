@@ -72,3 +72,28 @@ def test_silence_only_counts_during_the_regular_session(session, idle, expected)
 def test_silence_since_startup_counts_when_no_trade_ever_arrived():
     stats = FeedStats(connections=1, started_at=1_000.0)
     assert stats.problem("regular", stale_after=600, now=1_700.0) is not None
+
+
+def test_cors_allows_exact_origins_and_the_preview_pattern(monkeypatch):
+    # CORS settings are read at import time, so build a fresh app with the env applied.
+    import importlib
+
+    import src.main as main_module
+
+    monkeypatch.setenv("CORS_ORIGINS", "https://stock-streaming.vercel.app")
+    monkeypatch.setenv("CORS_ORIGIN_REGEX", r"https://stock-streaming-[a-z0-9]+-fuiji\.vercel\.app")
+    fresh = importlib.reload(main_module).app
+    fresh.state.feed = FeedStats()
+    client = TestClient(fresh)
+    try:
+        def allowed(origin):
+            resp = client.get("/health", headers={"Origin": origin})
+            return resp.headers.get("access-control-allow-origin") == origin
+
+        assert allowed("https://stock-streaming.vercel.app")
+        assert allowed("https://stock-streaming-eksr9qg7w-fuiji.vercel.app")
+        assert not allowed("https://stock-streaming-x-someone-else.vercel.app")
+        assert not allowed("https://evil.example")
+    finally:
+        monkeypatch.delenv("CORS_ORIGIN_REGEX")
+        importlib.reload(main_module)
