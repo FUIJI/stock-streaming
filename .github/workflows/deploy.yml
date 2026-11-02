@@ -109,8 +109,16 @@ jobs:
           if [[ -n $VM_KNOWN_HOSTS ]]; then
             printf '%s\n' "$VM_KNOWN_HOSTS" > ~/.ssh/known_hosts
           else
-            ssh-keyscan -H "$VM_HOST" > ~/.ssh/known_hosts
+            ssh-keyscan "$VM_HOST" > ~/.ssh/known_hosts || true
           fi
+          # Fail here with a readable reason instead of "Host key verification failed" later.
+          if ! ssh-keygen -F "$VM_HOST" -f ~/.ssh/known_hosts >/dev/null; then
+            echo "::error::No host key for VM_HOST in known_hosts. VM_KNOWN_HOSTS must start each line with exactly the VM_HOST value (see docs/runbook.md 1.4)."
+            exit 1
+          fi
+          echo "Trusted host keys for VM_HOST:"
+          ssh-keygen -l -F "$VM_HOST" -f ~/.ssh/known_hosts | grep -v '^#'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 "$VM_USER@$VM_HOST" true
 
       - name: Copy compose files to the VM
         run: |
