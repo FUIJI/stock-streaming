@@ -132,6 +132,15 @@ dc run --rm api python -m src.backfill --days 5
 
 > `NEXT_PUBLIC_*` ถูกฝังตอน build ถ้าเปลี่ยนค่าต้อง Redeploy บน Vercel
 
+### 1.9 แจ้งเตือนเมื่อข้อมูลหยุดไหล (UptimeRobot ฟรี)
+
+1. https://uptimerobot.com → สมัคร → **Add New Monitor**
+2. Monitor Type **HTTP(s)**, URL `https://api.fuiji-stock.duckdns.org/health/feed`, interval 5 นาที
+3. ใส่อีเมลหรือ LINE/Telegram ที่ต้องการให้แจ้งเตือน
+
+`/health/feed` ตอบ **503** เมื่อไม่มี ingestion เชื่อมต่ออยู่ หรือไม่มี trade เข้ามาเกิน 10 นาทีระหว่างตลาดเปิดช่วง regular
+(ช่วง pre/post ไม่นับ เพราะ IEX เงียบนานได้เป็นปกติ) ดูรายละเอียดได้จาก body ของ response
+
 ---
 
 ## 2. งานประจำ

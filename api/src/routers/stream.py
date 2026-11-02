@@ -7,6 +7,8 @@ from collections import defaultdict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from ..feed import FeedStats
+
 log = logging.getLogger("api.stream")
 
 router = APIRouter()
@@ -38,7 +40,7 @@ class TradeBroadcaster:
                 pass
 
 
-async def consume_trades(broadcaster: TradeBroadcaster) -> None:
+async def consume_trades(broadcaster: TradeBroadcaster, stats: FeedStats) -> None:
     """Background task: trades.raw -> broadcaster. Retries until Kafka is up."""
     from aiokafka import AIOKafkaConsumer
 
@@ -54,11 +56,13 @@ async def consume_trades(broadcaster: TradeBroadcaster) -> None:
         )
         try:
             await consumer.start()
+            stats.connections = 1
             log.info("Consuming %s from %s", topic, broker)
             async for msg in consumer:
                 payload = msg.value.decode()
                 symbol = msg.key.decode() if msg.key else json.loads(payload).get("symbol", "")
                 if symbol:
+                    stats.record_trade()
                     broadcaster.publish(symbol, payload)
         except asyncio.CancelledError:
             raise
@@ -66,6 +70,7 @@ async def consume_trades(broadcaster: TradeBroadcaster) -> None:
             log.exception("Kafka consumer failed; retrying in 5s")
             await asyncio.sleep(5)
         finally:
+            stats.connections = 0
             await consumer.stop()
 
 
@@ -100,6 +105,8 @@ async def ws_ingest(websocket: WebSocket) -> None:
 
     await websocket.accept()
     broadcaster: TradeBroadcaster = websocket.app.state.broadcaster
+    stats: FeedStats = websocket.app.state.feed
+    stats.connections += 1
     try:
         async for payload in websocket.iter_text():
             try:
@@ -110,6 +117,9 @@ async def ws_ingest(websocket: WebSocket) -> None:
             except (ValueError, KeyError, TypeError):
                 log.warning("Dropping malformed trade: %.200s", payload)
                 continue
+            stats.record_trade()
             broadcaster.publish(symbol, payload)
     except WebSocketDisconnect:
         pass
+    finally:
+        stats.connections -= 1
