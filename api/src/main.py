@@ -9,7 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from .aggregator import CandleAggregator, flush_candles, load_recent_candles, run_flusher
 from .alpaca import AlpacaClient
 from .db import create_pool
+from .backfill import parse_symbols
 from .feed import FeedStats
+from .jobs import run_schedule
 from .market import MarketCalendar
 from .migrate import migrate
 from .routers import candles, health, market, stream
@@ -43,11 +45,17 @@ async def lifespan(app: FastAPI):
         app.state.aggregator.seed(await load_recent_candles(app.state.pool))
         interval = float(os.environ.get("CANDLE_FLUSH_SEC", "2"))
         task = asyncio.create_task(run_flusher(app.state.aggregator, app.state.pool, interval))
+    tasks = [task]
+    if app.state.alpaca is not None and os.environ.get("RECONCILE_AT_UTC", "01:30") != "off":
+        symbols = parse_symbols(os.environ.get("SYMBOLS", "AAPL,MSFT,NVDA,TSLA"))
+        tasks.append(asyncio.create_task(run_schedule(app.state.pool, app.state.alpaca, symbols)))
     log.info("Trade feed: %s", feed)
     yield
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
+    for t in tasks:
+        t.cancel()
+    for t in tasks:
+        with suppress(asyncio.CancelledError):
+            await t
     if app.state.aggregator is not None:
         with suppress(Exception):
             await flush_candles(app.state.aggregator, app.state.pool)

@@ -57,10 +57,12 @@ services:
       CANDLE_ROLLUP: sql
       INGEST_TOKEN: ${INGEST_TOKEN:?set INGEST_TOKEN in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
-      # Only used by the one-shot backfill: docker compose ... run --rm api python -m src.backfill
+      # Market calendar, quotes, nightly reconcile and the one-shot backfill/jobs
       ALPACA_API_KEY: ${ALPACA_API_KEY:-}
       ALPACA_API_SECRET: ${ALPACA_API_SECRET:-}
       ALPACA_FEED: ${ALPACA_FEED:-iex}
+      ALPACA_HISTORY_FEED: ${ALPACA_HISTORY_FEED:-sip}
+      RECONCILE_AT_UTC: ${RECONCILE_AT_UTC:-01:30}
       SYMBOLS: ${SYMBOLS:-AAPL,MSFT,NVDA,TSLA}
     ports:
       - "${API_BIND:-127.0.0.1}:8000:8000"

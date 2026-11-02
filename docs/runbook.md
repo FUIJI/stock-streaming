@@ -152,7 +152,8 @@ dc run --rm api python -m src.backfill --days 5
 | ดู log | `dc logs -f --tail=100 api ingestion` |
 | ดูสถานะ / RAM | `dc ps` · `docker stats --no-stream` · `free -h` |
 | Restart | `dc restart api ingestion` |
-| Backfill เพิ่ม | `dc run --rm api python -m src.backfill --days 10` |
+| Backfill เพิ่ม | `dc run --rm api python -m src.backfill --days 10` (ค่าเริ่มต้นใช้ SIP ถ้าแผนไม่อนุญาตจะใช้ IEX แทนอัตโนมัติ) |
+| Reconcile เอง | `dc run --rm api python -m src.jobs reconcile --days 2` (ปกติ API รันให้เองทุกคืนเวลา `RECONCILE_AT_UTC` และหลัง start) |
 | เพิ่มหรือลดหุ้น | แก้ `SYMBOLS` ใน `.env` แล้วรัน `dc up -d ingestion` (Alpaca free รับได้ ~30 ตัว) |
 | เข้า psql | `dc exec postgres psql -U stock -d stocks` |
 | หมุน `INGEST_TOKEN` | แก้ `.env` แล้วรัน `dc up -d api ingestion` (ทั้งสองตัวต้องใช้ค่าเดียวกัน) |
