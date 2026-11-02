@@ -26,10 +26,16 @@ async def health(request: Request) -> dict:
 
     version = deployed image tag; the deploy workflow waits for it to change.
     """
+    news = getattr(request.app.state, "news", None)
     return {
         "status": "ok",
         "version": os.environ.get("APP_VERSION", "dev"),
         "feed": _feed_summary(request.app.state.feed),
+        "news": None if news is None else {
+            "last_poll_at": (datetime.fromtimestamp(news.last_poll_at, tz=UTC)
+                             if news.last_poll_at else None),
+            "last_error": news.last_error,
+        },
     }
 
 

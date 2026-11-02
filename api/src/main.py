@@ -15,6 +15,7 @@ from .jobs import run_schedule
 from .limits import ConnectionLimiter, RateLimiter, RateLimitMiddleware
 from .market import MarketCalendar
 from .migrate import migrate
+from .news.poller import NewsStats, run_poller
 from .quotes import SnapshotCache
 from .symbols import register_symbols
 from .routers import candles, health, market, quotes, stream
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI):
                            if app.state.alpaca else None)
     app.state.symbols = parse_symbols(os.environ.get("SYMBOLS", "AAPL,MSFT,NVDA,TSLA"))
     await register_symbols(app.state.pool, app.state.symbols)
+    app.state.news = NewsStats()
     app.state.aggregator = None
     if feed == "kafka":
         task = asyncio.create_task(consume_trades(app.state.broadcaster, app.state.feed))
@@ -59,6 +61,11 @@ async def lifespan(app: FastAPI):
     if app.state.alpaca is not None and os.environ.get("RECONCILE_AT_UTC", "01:30") != "off":
         tasks.append(asyncio.create_task(
             run_schedule(app.state.pool, app.state.alpaca, app.state.symbols)))
+    news_interval = float(os.environ.get("NEWS_POLL_SEC", "60"))
+    if app.state.alpaca is not None and news_interval > 0:
+        tasks.append(asyncio.create_task(run_poller(
+            app.state.pool, app.state.alpaca, app.state.symbols, app.state.news, news_interval,
+            float(os.environ.get("NEWS_BACKFILL_DAYS", "3")))))
     log.info("Trade feed: %s", feed)
     yield
     for t in tasks:
