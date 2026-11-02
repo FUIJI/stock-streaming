@@ -81,11 +81,11 @@ rm ~/gh_deploy           # ลบ private key ออกจาก VM หลัง
 Host key ของ VM สำหรับ secret `VM_KNOWN_HOSTS` (อ่านจาก VM เองโดยตรง จึงเชื่อถือได้ที่สุด):
 
 ```bash
-for f in /etc/ssh/ssh_host_*_key.pub; do echo "140.245.108.27 $(cut -d' ' -f1,2 "$f")"; done
+for f in /etc/ssh/ssh_host_*_key.pub; do echo "140.245.108.27,fuiji-stock.duckdns.org $(cut -d' ' -f1,2 "$f")"; done
 ```
 
-copy ผลลัพธ์ทุกบรรทัดไปใส่ `VM_KNOWN_HOSTS` โดย **ชื่อที่ขึ้นต้นแต่ละบรรทัดต้องตรงกับค่า `VM_HOST` ทุกตัวอักษร**
-(ถ้า `VM_HOST` เป็น IP ก็ต้องเป็น IP ถ้าเป็นโดเมนก็ต้องเป็นโดเมน) ไม่อย่างนั้น deploy จะ fail ด้วย `Host key verification failed`
+copy ผลลัพธ์ทุกบรรทัดไปใส่ `VM_KNOWN_HOSTS` แต่ละบรรทัดใช้ได้ทั้งกับ IP และโดเมน
+ค่า `VM_HOST` ต้องเป็นหนึ่งในสองชื่อนี้ (ถ้าไม่ตรง deploy จะ fail ด้วย `Host key verification failed`)
 
 ### 1.5 GitHub repository settings
 
