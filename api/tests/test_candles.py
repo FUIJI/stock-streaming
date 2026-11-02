@@ -70,7 +70,8 @@ async def test_sql_rollup_queries_ohlcv_1m_with_date_bin(client_with_pool, monke
     assert resp.status_code == 200
     query, args = pool.calls[0]
     assert "date_bin" in query and "FROM ohlcv_1m" in query
-    assert args[-1] == timedelta(hours=1)
+    assert args[4] == timedelta(hours=1)
+    assert args[5] == 501 * 60  # rows read are bounded by limit (default 500), not history
 
 
 async def test_sql_rollup_keeps_1m_on_base_table(client_with_pool, monkeypatch):
@@ -78,3 +79,11 @@ async def test_sql_rollup_keeps_1m_on_base_table(client_with_pool, monkeypatch):
     client, pool = client_with_pool
     await client.get("/candles", params={"symbol": "AAPL", "interval": "1m"})
     assert "date_bin" not in pool.calls[0][0]
+
+
+async def test_sql_rollup_rejects_huge_limits(client_with_pool, monkeypatch):
+    monkeypatch.setenv("CANDLE_ROLLUP", "sql")
+    client, pool = client_with_pool
+    resp = await client.get("/candles", params={"symbol": "AAPL", "interval": "5m",
+                                                "limit": 1001})
+    assert resp.status_code == 422 and pool.calls == []

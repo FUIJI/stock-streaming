@@ -52,7 +52,9 @@ DAILY_SQL = """
 """
 
 # CANDLE_ROLLUP=sql: plain Postgres (Supabase/Neon have no continuous aggregates),
-# so coarser intervals are rolled up from ohlcv_1m at query time.
+# so coarser intervals are rolled up from ohlcv_1m at query time. The inner
+# LIMIT ($6 = (limit + 1) * minutes per candle, newest first via the primary key)
+# keeps the work proportional to `limit`, not to the symbol's whole history.
 ROLLUP_SQL = """
     SELECT symbol,
            date_bin($5::interval, bucket_start, TIMESTAMPTZ '2000-01-01') AS bucket_start,
@@ -62,14 +64,19 @@ ROLLUP_SQL = """
            (array_agg(close ORDER BY bucket_start DESC))[1] AS close,
            sum(volume)                                      AS volume,
            sum(trade_count)::bigint                         AS trade_count
-    FROM ohlcv_1m
-    WHERE symbol = $1
-      AND ($2::timestamptz IS NULL OR bucket_start >= $2)
-      AND ($3::timestamptz IS NULL OR bucket_start <= $3)
+    FROM (
+        SELECT * FROM ohlcv_1m
+        WHERE symbol = $1
+          AND ($2::timestamptz IS NULL OR bucket_start >= $2)
+          AND ($3::timestamptz IS NULL OR bucket_start <= $3)
+        ORDER BY bucket_start DESC
+        LIMIT $6
+    ) recent
     GROUP BY 1, 2
     ORDER BY 2 DESC
     LIMIT $4
 """
+MAX_ROLLUP_LIMIT = 1000
 
 
 @router.get("/candles", response_model=list[Candle])
@@ -91,8 +98,14 @@ async def get_candles(
     if interval == "1d":
         query = DAILY_SQL
     elif interval != "1m" and os.environ.get("CANDLE_ROLLUP", "timescale").lower() == "sql":
+        if limit > MAX_ROLLUP_LIMIT:
+            raise HTTPException(status_code=422,
+                                detail=f"limit for {interval} is at most {MAX_ROLLUP_LIMIT}")
+        width = INTERVAL_WIDTHS[interval]
+        minutes = int(width.total_seconds() // 60)
+        # One extra candle: if the row cap cut into the oldest one, it is incomplete.
+        args = [symbol.upper(), start, end, limit + 1, width, (limit + 1) * minutes]
         query = ROLLUP_SQL
-        args.append(INTERVAL_WIDTHS[interval])
     else:
         query = f"""
             SELECT symbol, bucket_start, open, high, low, close, volume, trade_count
@@ -104,6 +117,7 @@ async def get_candles(
             LIMIT $4
         """
     rows = await pool.fetch(query, *args)
+    rows = rows[:limit]  # drops the possibly-partial extra rollup candle (oldest)
     # Query newest-first to honor the limit, return oldest-first for charting.
     return [Candle(**dict(row)) for row in reversed(rows)]
 
