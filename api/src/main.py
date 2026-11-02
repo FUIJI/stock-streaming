@@ -7,9 +7,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .aggregator import CandleAggregator, flush_candles, load_recent_candles, run_flusher
+from .alpaca import AlpacaClient
 from .db import create_pool
+from .market import MarketCalendar
 from .migrate import migrate
-from .routers import candles, stream
+from .routers import candles, market, stream
 from .routers.stream import TradeBroadcaster, consume_trades
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -29,6 +31,8 @@ async def lifespan(app: FastAPI):
     app.state.pool = await create_pool()
     await migrate(app.state.pool)
     app.state.broadcaster = TradeBroadcaster()
+    app.state.alpaca = AlpacaClient.from_env()
+    app.state.market = MarketCalendar(app.state.alpaca) if app.state.alpaca else None
     app.state.aggregator = None
     if feed == "kafka":
         task = asyncio.create_task(consume_trades(app.state.broadcaster))
@@ -45,6 +49,8 @@ async def lifespan(app: FastAPI):
     if app.state.aggregator is not None:
         with suppress(Exception):
             await flush_candles(app.state.aggregator, app.state.pool)
+    if app.state.alpaca is not None:
+        await app.state.alpaca.aclose()
     await app.state.pool.close()
 
 
@@ -58,6 +64,7 @@ app.add_middleware(
 )
 
 app.include_router(candles.router)
+app.include_router(market.router)
 app.include_router(stream.router)
 
 
