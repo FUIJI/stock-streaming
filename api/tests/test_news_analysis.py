@@ -1,0 +1,51 @@
+import pytest
+from pydantic import ValidationError
+
+from src.news.analysis import NewsAnalysis, NewsItem, finalize
+
+ITEM = NewsItem(id=1, headline="h", summary="s", tags=["AAPL", "MSFT", "SPY"],
+                tracked=["AAPL", "MSFT"])
+
+
+def analysis(**overrides) -> NewsAnalysis:
+    base = {
+        "id": 1, "summary_th": "สรุป", "why_it_matters": "เหตุผล", "category": "earnings",
+        "importance": 5, "is_market_wide": False,
+        "per_symbol": [{"symbol": "AAPL", "relevance": 0.9, "sentiment": 0.6}],
+    }
+    return NewsAnalysis.model_validate({**base, **overrides})
+
+
+def test_relevant_company_news_keeps_its_importance():
+    final = finalize(analysis(), ITEM)
+    assert final.importance == 5
+    assert [(a.symbol, a.relevance) for a in final.per_symbol] == [("AAPL", 0.9), ("MSFT", 0)]
+
+
+def test_incidental_tags_cap_importance():
+    final = finalize(analysis(per_symbol=[{"symbol": "AAPL", "relevance": 0.2, "sentiment": 0}]),
+                     ITEM)
+    assert final.importance == 2 and final.analysis.importance == 5  # raw value kept
+
+
+def test_market_roundups_are_capped_even_when_relevant():
+    assert finalize(analysis(category="market_roundup"), ITEM).importance == 2
+
+
+def test_symbols_outside_the_articles_tracked_tags_are_dropped():
+    final = finalize(analysis(per_symbol=[
+        {"symbol": "aapl", "relevance": 0.9, "sentiment": 0.5},
+        {"symbol": "SPY", "relevance": 1, "sentiment": 1},   # tagged but not tracked
+        {"symbol": "TSLA", "relevance": 1, "sentiment": -1},  # invented by the model
+    ]), ITEM)
+    assert [a.symbol for a in final.per_symbol] == ["AAPL", "MSFT"]
+
+
+@pytest.mark.parametrize("bad", [
+    {"importance": 6}, {"importance": 0}, {"category": "rumour"}, {"summary_th": ""},
+    {"per_symbol": [{"symbol": "AAPL", "relevance": 1.5, "sentiment": 0}]},
+    {"per_symbol": [{"symbol": "AAPL", "relevance": 0.5, "sentiment": -2}]},
+])
+def test_out_of_range_output_is_rejected(bad):
+    with pytest.raises(ValidationError):
+        analysis(**bad)
