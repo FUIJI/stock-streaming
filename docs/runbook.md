@@ -116,6 +116,8 @@ cd ~/docker/stock-streaming
 dc run --rm api python -m src.backfill --days 5
 ```
 
+(ดึงแท่ง 1 นาทีย้อนหลัง 5 วัน และแท่งรายวันย้อนหลัง 5 ปีด้วย `--daily-days 1825` ซึ่งเป็นค่าเริ่มต้น)
+
 ✅ `curl "https://api.fuiji-stock.duckdns.org/candles?symbol=AAPL&limit=3"` ได้แท่งเทียนกลับมา
 
 ### 1.8 Frontend บน Vercel
@@ -132,6 +134,15 @@ dc run --rm api python -m src.backfill --days 5
 
 > `NEXT_PUBLIC_*` ถูกฝังตอน build ถ้าเปลี่ยนค่าต้อง Redeploy บน Vercel
 
+### 1.9 แจ้งเตือนเมื่อข้อมูลหยุดไหล (UptimeRobot ฟรี)
+
+1. https://uptimerobot.com → สมัคร → **Add New Monitor**
+2. Monitor Type **HTTP(s)**, URL `https://api.fuiji-stock.duckdns.org/health/feed`, interval 5 นาที
+3. ใส่อีเมลหรือ LINE/Telegram ที่ต้องการให้แจ้งเตือน
+
+`/health/feed` ตอบ **503** เมื่อไม่มี ingestion เชื่อมต่ออยู่ หรือไม่มี trade เข้ามาเกิน 10 นาทีระหว่างตลาดเปิดช่วง regular
+(ช่วง pre/post ไม่นับ เพราะ IEX เงียบนานได้เป็นปกติ) ดูรายละเอียดได้จาก body ของ response
+
 ---
 
 ## 2. งานประจำ
@@ -143,7 +154,8 @@ dc run --rm api python -m src.backfill --days 5
 | ดู log | `dc logs -f --tail=100 api ingestion` |
 | ดูสถานะ / RAM | `dc ps` · `docker stats --no-stream` · `free -h` |
 | Restart | `dc restart api ingestion` |
-| Backfill เพิ่ม | `dc run --rm api python -m src.backfill --days 10` |
+| Backfill เพิ่ม | `dc run --rm api python -m src.backfill --days 10` (ค่าเริ่มต้นใช้ SIP ถ้าแผนไม่อนุญาตจะใช้ IEX แทนอัตโนมัติ) |
+| Reconcile เอง | `dc run --rm api python -m src.jobs reconcile --days 2` (ปกติ API รันให้เองทุกคืนเวลา `RECONCILE_AT_UTC` และหลัง start) |
 | เพิ่มหรือลดหุ้น | แก้ `SYMBOLS` ใน `.env` แล้วรัน `dc up -d ingestion` (Alpaca free รับได้ ~30 ตัว) |
 | เข้า psql | `dc exec postgres psql -U stock -d stocks` |
 | หมุน `INGEST_TOKEN` | แก้ `.env` แล้วรัน `dc up -d api ingestion` (ทั้งสองตัวต้องใช้ค่าเดียวกัน) |

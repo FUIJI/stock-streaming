@@ -30,6 +30,8 @@ UPSERT_SQL = """
         updated_at = now()
 """
 
+UPSERT_1D_SQL = UPSERT_SQL.replace("ohlcv_1m", "ohlcv_1d")
+
 CandleRow = tuple[str, datetime, float, float, float, float, float, int]
 
 

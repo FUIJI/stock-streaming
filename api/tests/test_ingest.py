@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from src.aggregator import CandleAggregator
+from src.feed import FeedStats
 from src.main import app
 from src.routers.stream import TradeBroadcaster
 
@@ -17,6 +18,7 @@ def lite_client(monkeypatch):
     # No `with` block: skip lifespan (it would open a real DB pool) and wire state by hand.
     app.state.broadcaster = TradeBroadcaster()
     app.state.aggregator = CandleAggregator()
+    app.state.feed = FeedStats()
     yield TestClient(app)
     app.state.aggregator = None
 

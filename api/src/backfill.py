@@ -1,10 +1,9 @@
-"""One-shot backfill of historical 1-minute bars from Alpaca into ohlcv_1m.
+"""Historical bars from Alpaca into ohlcv_1m (and daily bars into ohlcv_1d).
 
-    python -m src.backfill --days 5 --symbols AAPL,MSFT
+    python -m src.backfill --days 5 [--daily-days 1825] [--symbols AAPL,MSFT] [--feed sip|iex]
 
-Reads ALPACA_API_KEY / ALPACA_API_SECRET / ALPACA_FEED and the usual PG_* vars.
-Stops two minutes short of now so it never overwrites the candle the live
-aggregator is still building.
+Reads ALPACA_API_KEY / ALPACA_API_SECRET, ALPACA_HISTORY_FEED (default sip) and
+the usual PG_* vars. Also used by the reconcile job (src/jobs.py).
 """
 
 import argparse
@@ -13,19 +12,23 @@ import logging
 import os
 from datetime import UTC, datetime, timedelta
 
-import httpx
+import asyncpg
 
-from .aggregator import UPSERT_SQL, CandleRow
+from .aggregator import UPSERT_1D_SQL, UPSERT_SQL, CandleRow
+from .alpaca import AlpacaClient, AlpacaError
 from .db import create_pool
+from .migrate import migrate
 
 log = logging.getLogger("api.backfill")
 
-BARS_URL = "https://data.alpaca.markets/v2/stocks/bars"
+# The free plan serves SIP history except the most recent 15 minutes. IEX only
+# needs to stay clear of the candle the live aggregator is still building.
+SAFETY_MARGIN = {"sip": timedelta(minutes=16), "iex": timedelta(minutes=2)}
 
 
-def parse_bars(payload: dict) -> list[CandleRow]:
+def bars_to_rows(bars_by_symbol: dict[str, list[dict]]) -> list[CandleRow]:
     rows: list[CandleRow] = []
-    for symbol, bars in (payload.get("bars") or {}).items():
+    for symbol, bars in bars_by_symbol.items():
         for b in bars:
             bucket_start = datetime.fromisoformat(b["t"].replace("Z", "+00:00"))
             rows.append((symbol, bucket_start, b["o"], b["h"], b["l"], b["c"],
@@ -33,57 +36,80 @@ def parse_bars(payload: dict) -> list[CandleRow]:
     return rows
 
 
-async def fetch_bars(client: httpx.AsyncClient, symbols: list[str], start: datetime,
-                     end: datetime, feed: str) -> list[CandleRow]:
-    params = {
-        "symbols": ",".join(symbols),
-        "timeframe": "1Min",
-        "start": start.isoformat(),
-        "end": end.isoformat(),
-        "feed": feed,
-        "limit": 10000,
-        "adjustment": "raw",
-    }
-    rows: list[CandleRow] = []
-    while True:
-        resp = await client.get(BARS_URL, params=params)
-        resp.raise_for_status()
-        payload = resp.json()
-        rows.extend(parse_bars(payload))
-        token = payload.get("next_page_token")
-        if not token:
-            return rows
-        params["page_token"] = token
+async def fetch_bars(alpaca: AlpacaClient, symbols: list[str], timeframe: str,
+                     start: datetime, end: datetime, feed: str) -> dict[str, list[dict]]:
+    """Like AlpacaClient.bars, but falls back to IEX if the plan refuses SIP."""
+    try:
+        return await alpaca.bars(symbols, timeframe, start, end, feed)
+    except AlpacaError as exc:
+        if feed != "sip" or "-> 403" not in str(exc):
+            raise
+        log.warning("SIP history refused (%s); falling back to IEX", exc)
+        return await alpaca.bars(symbols, timeframe, start, end, "iex")
 
 
-async def run(symbols: list[str], days: int) -> None:
-    key, secret = os.environ.get("ALPACA_API_KEY", ""), os.environ.get("ALPACA_API_SECRET", "")
-    if not (key and secret):
-        raise SystemExit("ALPACA_API_KEY and ALPACA_API_SECRET are required")
-    end = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=2)
+async def backfill_minutes(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[str],
+                           days: float, feed: str, now: datetime | None = None) -> int:
+    """Upsert 1-minute bars for the last `days` days; returns the number of rows."""
+    now = (now or datetime.now(UTC)).replace(second=0, microsecond=0)
+    end = now - SAFETY_MARGIN.get(feed, SAFETY_MARGIN["sip"])
     start = end - timedelta(days=days)
-    headers = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
-    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
-        rows = await fetch_bars(client, symbols, start, end,
-                                os.environ.get("ALPACA_FEED", "iex"))
-    log.info("Fetched %d bars for %s (%s -> %s)", len(rows), symbols, start, end)
-    if not rows:
-        return
+    rows = bars_to_rows(await fetch_bars(alpaca, symbols, "1Min", start, end, feed))
+    if rows:
+        await pool.executemany(UPSERT_SQL, rows)
+    log.info("1m: upserted %d bars for %s (%s -> %s, feed=%s)", len(rows), symbols,
+             start, end, feed)
+    return len(rows)
+
+
+async def backfill_daily(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[str],
+                         days: float, feed: str, now: datetime | None = None) -> int:
+    """Upsert daily bars into ohlcv_1d. Today's partial bar may land too; /candles
+    ignores today's row in ohlcv_1d and the nightly reconcile completes it."""
+    now = (now or datetime.now(UTC)).replace(second=0, microsecond=0)
+    end = now - SAFETY_MARGIN.get(feed, SAFETY_MARGIN["sip"])
+    start = end - timedelta(days=days)
+    rows = bars_to_rows(await fetch_bars(alpaca, symbols, "1Day", start, end, feed))
+    if rows:
+        await pool.executemany(UPSERT_1D_SQL, rows)
+    log.info("1d: upserted %d bars for %s (%s -> %s, feed=%s)", len(rows), symbols,
+             start.date(), end.date(), feed)
+    return len(rows)
+
+
+def history_feed() -> str:
+    return os.environ.get("ALPACA_HISTORY_FEED", "sip").lower()
+
+
+def parse_symbols(raw: str) -> list[str]:
+    return [s.strip().upper() for s in raw.split(",") if s.strip()]
+
+
+async def run(symbols: list[str], days: float, daily_days: float, feed: str) -> None:
+    alpaca = AlpacaClient.from_env()
+    if alpaca is None:
+        raise SystemExit("ALPACA_API_KEY and ALPACA_API_SECRET are required")
     pool = await create_pool()
     try:
-        await pool.executemany(UPSERT_SQL, rows)
+        await migrate(pool)
+        await backfill_minutes(pool, alpaca, symbols, days, feed)
+        if daily_days > 0:
+            await backfill_daily(pool, alpaca, symbols, daily_days, feed)
     finally:
         await pool.close()
-    log.info("Upserted %d bars into ohlcv_1m", len(rows))
+        await alpaca.aclose()
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--days", type=int, default=5)
+    parser.add_argument("--days", type=float, default=5, help="1-minute bars, days back")
+    parser.add_argument("--daily-days", type=float, default=1825,
+                        help="daily bars, days back (0 to skip)")
     parser.add_argument("--symbols", default=os.environ.get("SYMBOLS", "AAPL,MSFT,NVDA,TSLA"))
+    parser.add_argument("--feed", default=history_feed(), choices=["sip", "iex"])
     args = parser.parse_args()
-    symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-    asyncio.run(run(symbols, args.days))
+    asyncio.run(run(parse_symbols(args.symbols), args.days, args.daily_days, args.feed))
 
 
 if __name__ == "__main__":

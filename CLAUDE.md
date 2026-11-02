@@ -24,7 +24,7 @@ ingestion (`TRADE_SINK=api`) → api WS `/internal/ingest` (`TRADE_FEED=ingest`,
 | `processing/spark/` | PySpark, local[*] | 1-min event-time windows, 30s watermark, upsert via foreachBatch |
 | `storage/timescale/init/` | SQL | Runs via /docker-entrypoint-initdb.d — only on FIRST boot of the volume; `make clean` to re-init. `001` must stay plain Postgres (lite stack mounts only it) |
 | `storage/minio/` | sh | Bucket bootstrap (bronze/silver/gold) |
-| `api/` | FastAPI, uv | REST reads TimescaleDB; WS consumes trades.raw via aiokafka (`TRADE_FEED=kafka`) or `/internal/ingest` (`ingest`). `CANDLE_ROLLUP=timescale\|sql` |
+| `api/` | FastAPI, uv | REST reads TimescaleDB; WS consumes trades.raw via aiokafka (`TRADE_FEED=kafka`) or `/internal/ingest` (`ingest`). `CANDLE_ROLLUP=timescale\|sql`. Alpaca REST (`src/alpaca.py`): calendar, quotes, backfill/reconcile (`src/jobs.py`) |
 | `frontend/` | Next.js + TS | lightweight-charts candlesticks |
 
 ## Commands
@@ -45,6 +45,10 @@ ingestion (`TRADE_SINK=api`) → api WS `/internal/ingest` (`TRADE_FEED=ingest`,
 - All config via env vars (12-factor). `.env` never committed; keep `.env.example` current.
 - Every Python service: uv + pyproject.toml, ruff, pytest, own Dockerfile + tests/.
 - Kafka messages are JSON, keyed by symbol. Schema = Pydantic `Trade` in `ingestion/src/schemas.py`.
+- Schema changes: add `api/src/migrations/NNNN_name.sql` (applied by the API at startup,
+  idempotent-safe with IF NOT EXISTS). `storage/timescale/init/` only runs on a new volume.
+- API integration tests need Postgres: `TEST_PG_DSN=postgresql://postgres:test@127.0.0.1:55432/postgres`
+  (CI provides one); without it they are skipped.
 - Shell scripts and SQL must stay LF (enforced via .gitattributes) — they run inside Linux containers.
 - Commit at the end of each working milestone.
 

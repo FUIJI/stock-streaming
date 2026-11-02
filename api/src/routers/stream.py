@@ -5,7 +5,11 @@ import os
 import secrets
 from collections import defaultdict
 
+import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from ..feed import FeedStats
+from ..limits import ConnectionLimiter
 
 log = logging.getLogger("api.stream")
 
@@ -38,7 +42,7 @@ class TradeBroadcaster:
                 pass
 
 
-async def consume_trades(broadcaster: TradeBroadcaster) -> None:
+async def consume_trades(broadcaster: TradeBroadcaster, stats: FeedStats) -> None:
     """Background task: trades.raw -> broadcaster. Retries until Kafka is up."""
     from aiokafka import AIOKafkaConsumer
 
@@ -54,34 +58,68 @@ async def consume_trades(broadcaster: TradeBroadcaster) -> None:
         )
         try:
             await consumer.start()
+            stats.connections = 1
             log.info("Consuming %s from %s", topic, broker)
             async for msg in consumer:
                 payload = msg.value.decode()
-                symbol = msg.key.decode() if msg.key else json.loads(payload).get("symbol", "")
-                if symbol:
-                    broadcaster.publish(symbol, payload)
+                try:
+                    trade = json.loads(payload)
+                    symbol = msg.key.decode() if msg.key else str(trade["symbol"])
+                    stats.record_trade(symbol, float(trade["price"]), int(trade["ts"]))
+                except (ValueError, KeyError, TypeError):
+                    log.warning("Dropping malformed trade: %.200s", payload)
+                    continue
+                broadcaster.publish(symbol, payload)
         except asyncio.CancelledError:
             raise
         except Exception:
             log.exception("Kafka consumer failed; retrying in 5s")
             await asyncio.sleep(5)
         finally:
+            stats.connections = 0
             await consumer.stop()
 
 
 @router.websocket("/ws/{symbol}")
 async def ws_trades(websocket: WebSocket, symbol: str) -> None:
-    await websocket.accept()
-    broadcaster: TradeBroadcaster = websocket.app.state.broadcaster
+    state = websocket.app.state
     symbol = symbol.upper()
-    queue = broadcaster.subscribe(symbol)
+    ip = websocket.client.host if websocket.client else "unknown"
+    limiter: ConnectionLimiter | None = getattr(state, "ws_limiter", None)
+    if symbol not in state.symbols:
+        await websocket.close(code=1008)  # rejected during the handshake (HTTP 403)
+        return
+    if limiter is not None and not limiter.acquire(ip):
+        await websocket.close(code=1013)
+        return
+
+    broadcaster: TradeBroadcaster = state.broadcaster
+    queue = broadcaster.subscribe(symbol)  # before accept, so no trade slips in between
     try:
-        while True:
-            await websocket.send_text(await queue.get())
-    except WebSocketDisconnect:
-        pass
+        await websocket.accept()
+        async with anyio.create_task_group() as tg:
+
+            async def forward() -> None:
+                try:
+                    while True:
+                        await websocket.send_text(await queue.get())
+                except Exception:  # client already gone mid-send
+                    tg.cancel_scope.cancel()
+
+            async def until_client_leaves() -> None:
+                # Without reading, a client that disconnects while no trades flow
+                # (market closed) would only be noticed on the next send, keeping
+                # its queue and connection slot meanwhile.
+                while (await websocket.receive())["type"] != "websocket.disconnect":
+                    pass
+                tg.cancel_scope.cancel()
+
+            tg.start_soon(forward)
+            tg.start_soon(until_client_leaves)
     finally:
         broadcaster.unsubscribe(symbol, queue)
+        if limiter is not None:
+            limiter.release(ip)
 
 
 @router.websocket("/internal/ingest")
@@ -100,16 +138,21 @@ async def ws_ingest(websocket: WebSocket) -> None:
 
     await websocket.accept()
     broadcaster: TradeBroadcaster = websocket.app.state.broadcaster
+    stats: FeedStats = websocket.app.state.feed
+    stats.connections += 1
     try:
         async for payload in websocket.iter_text():
             try:
                 trade = json.loads(payload)
                 symbol = str(trade["symbol"])
-                aggregator.add(symbol, float(trade["price"]), float(trade["volume"]),
-                               int(trade["ts"]))
+                price, ts = float(trade["price"]), int(trade["ts"])
+                aggregator.add(symbol, price, float(trade["volume"]), ts)
             except (ValueError, KeyError, TypeError):
                 log.warning("Dropping malformed trade: %.200s", payload)
                 continue
+            stats.record_trade(symbol, price, ts)
             broadcaster.publish(symbol, payload)
     except WebSocketDisconnect:
         pass
+    finally:
+        stats.connections -= 1
