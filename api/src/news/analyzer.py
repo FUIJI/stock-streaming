@@ -1,7 +1,6 @@
 """Run a batch of articles through the LLM, falling back to one article per call."""
 
 import logging
-import re
 from dataclasses import dataclass, field
 
 from pydantic import ValidationError
@@ -11,16 +10,6 @@ from .llm import LLMError, LLMProvider
 from .prompt import RESPONSE_SCHEMA, SYSTEM_PROMPT, build_user_message
 
 log = logging.getLogger("api.news.llm")
-
-
-_OPEN_FENCE = re.compile(r"^```[a-zA-Z]*\s*")
-_CLOSE_FENCE = re.compile(r"\s*```$")
-
-
-def extract_json(text: str) -> str:
-    """The JSON document in a model reply. Gemma on the VM added markdown fences
-    despite application/json, sometimes only the closing one."""
-    return _CLOSE_FENCE.sub("", _OPEN_FENCE.sub("", text.strip())).strip()
 
 
 @dataclass
@@ -36,7 +25,7 @@ async def _call(provider: LLMProvider, items: list[NewsItem], names: dict[str, s
     raw = await provider.generate_json(SYSTEM_PROMPT, build_user_message(items, names),
                                        RESPONSE_SCHEMA)
     try:
-        return BatchAnalysis.model_validate_json(extract_json(raw))
+        return BatchAnalysis.model_validate_json(raw)
     except ValidationError as exc:
         raise LLMError(f"invalid model output: {str(exc)[:300]}", retryable=True,
                        bad_output=True) from exc

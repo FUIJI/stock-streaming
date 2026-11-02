@@ -102,39 +102,3 @@ async def test_http_errors_stop_the_one_by_one_retries_too():
     bad_key = FakeGemini(httpx.Response(400, text="API key not valid"))
     result = await analyze(bad_key.provider(), ITEMS, NAMES)
     assert result.calls == 1 and not result.failed[2].retryable  # no per-article retries
-
-
-async def test_thinking_level_is_only_sent_to_gemini_models():
-    fake = FakeGemini(gemini_reply({"items": [item_json(1, "AAPL")]}))
-    gemma = GeminiProvider("k", "gemma-4-26b-a4b-it", thinking_level="low",
-                           transport=httpx.MockTransport(fake.handler))
-    await analyze(gemma, ITEMS[:1], NAMES)
-    assert "thinkingConfig" not in json.loads(fake.requests[0].content)["generationConfig"]
-
-
-async def test_network_errors_name_their_type():
-    def timeout(request):
-        raise httpx.ReadTimeout("", request=request)
-
-    result = await analyze(FakeGemini(timeout).provider(), ITEMS[:1], NAMES)
-    message = str(result.failed[1])
-    assert "ReadTimeout" in message and "after" in message and result.failed[1].retryable
-
-
-def test_extract_json_unwraps_markdown_fences():
-    from src.news.analyzer import extract_json
-
-    doc = '{"items": []}'
-    assert extract_json(doc) == doc
-    assert extract_json(f"```json\n{doc}\n```") == doc
-    assert extract_json(f"```\n{doc}\n```\n") == doc
-    assert extract_json(f"  {doc}  \n") == doc
-    assert extract_json(f"{doc}\n```") == doc  # closing fence only, as Gemma replied
-    assert extract_json(f"```json\n{doc}") == doc
-
-
-async def test_fenced_reply_like_gemmas_is_accepted():
-    # The shape seen on the VM: valid JSON, then a closing fence on its own line.
-    reply = "```json\n" + json.dumps({"items": [item_json(1, "AAPL")]}, indent=2) + "\n```"
-    result = await analyze(FakeGemini(gemini_reply(reply)).provider(), ITEMS[:1], NAMES)
-    assert list(result.done) == [1] and result.calls == 1

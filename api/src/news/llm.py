@@ -1,7 +1,6 @@
 """LLM providers behind one small interface (LLM_PROVIDER / LLM_MODEL)."""
 
 import os
-import time
 from typing import Protocol
 
 import httpx
@@ -37,12 +36,11 @@ class GeminiProvider:
 
     def __init__(self, api_key: str, model: str, temperature: float | None = None,
                  thinking_level: str | None = None, base_url: str = GEMINI_URL,
-                 transport: httpx.AsyncBaseTransport | None = None, timeout: float = 300):
+                 transport: httpx.AsyncBaseTransport | None = None):
         self.model = model
         self._temperature = temperature
-        # Only Gemini models take a thinking level; Gemma rejects it with a 400.
-        self._thinking_level = thinking_level if model.startswith("gemini") else None
-        self._http = httpx.AsyncClient(base_url=base_url, timeout=timeout, transport=transport,
+        self._thinking_level = thinking_level
+        self._http = httpx.AsyncClient(base_url=base_url, timeout=60, transport=transport,
                                        headers={"x-goog-api-key": api_key})
 
     async def generate_json(self, system: str, user: str, schema: dict) -> str:
@@ -56,14 +54,10 @@ class GeminiProvider:
             "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": config,
         }
-        started = time.monotonic()
         try:
             resp = await self._http.post(f"/v1beta/models/{self.model}:generateContent", json=body)
         except httpx.HTTPError as exc:
-            # str() of timeouts is empty: the exception type is the useful part.
-            raise LLMError(
-                f"Gemini request failed after {time.monotonic() - started:.0f}s: "
-                f"{type(exc).__name__} {exc}".rstrip(), retryable=True) from exc
+            raise LLMError(f"Gemini request failed: {exc}", retryable=True) from exc
         if resp.status_code >= 400:
             raise LLMError(f"Gemini {resp.status_code}: {resp.text[:300]}",
                            retryable=resp.status_code == 429 or resp.status_code >= 500)
@@ -95,7 +89,5 @@ def provider_from_env() -> LLMProvider | None:
             temperature=float(temperature) if temperature else None,
             thinking_level=os.environ.get("LLM_THINKING_LEVEL", "low") or None,
             base_url=os.environ.get("GEMINI_BASE_URL", GEMINI_URL),
-            # Gemma on the free tier took ~30s per article: leave room for a batch.
-            timeout=float(os.environ.get("LLM_TIMEOUT_SEC", "300")),
         )
     raise RuntimeError(f"Unknown LLM_PROVIDER: {name!r} (expected gemini|off)")
