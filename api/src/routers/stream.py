@@ -60,10 +60,14 @@ async def consume_trades(broadcaster: TradeBroadcaster, stats: FeedStats) -> Non
             log.info("Consuming %s from %s", topic, broker)
             async for msg in consumer:
                 payload = msg.value.decode()
-                symbol = msg.key.decode() if msg.key else json.loads(payload).get("symbol", "")
-                if symbol:
-                    stats.record_trade()
-                    broadcaster.publish(symbol, payload)
+                try:
+                    trade = json.loads(payload)
+                    symbol = msg.key.decode() if msg.key else str(trade["symbol"])
+                    stats.record_trade(symbol, float(trade["price"]), int(trade["ts"]))
+                except (ValueError, KeyError, TypeError):
+                    log.warning("Dropping malformed trade: %.200s", payload)
+                    continue
+                broadcaster.publish(symbol, payload)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -112,12 +116,12 @@ async def ws_ingest(websocket: WebSocket) -> None:
             try:
                 trade = json.loads(payload)
                 symbol = str(trade["symbol"])
-                aggregator.add(symbol, float(trade["price"]), float(trade["volume"]),
-                               int(trade["ts"]))
+                price, ts = float(trade["price"]), int(trade["ts"])
+                aggregator.add(symbol, price, float(trade["volume"]), ts)
             except (ValueError, KeyError, TypeError):
                 log.warning("Dropping malformed trade: %.200s", payload)
                 continue
-            stats.record_trade()
+            stats.record_trade(symbol, price, ts)
             broadcaster.publish(symbol, payload)
     except WebSocketDisconnect:
         pass

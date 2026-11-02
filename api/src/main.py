@@ -14,7 +14,8 @@ from .feed import FeedStats
 from .jobs import run_schedule
 from .market import MarketCalendar
 from .migrate import migrate
-from .routers import candles, health, market, stream
+from .quotes import SnapshotCache
+from .routers import candles, health, market, quotes, stream
 from .routers.stream import TradeBroadcaster, consume_trades
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI):
     app.state.feed = FeedStats()
     app.state.alpaca = AlpacaClient.from_env()
     app.state.market = MarketCalendar(app.state.alpaca) if app.state.alpaca else None
+    app.state.snapshots = (SnapshotCache(app.state.alpaca, os.environ.get("ALPACA_FEED", "iex"))
+                           if app.state.alpaca else None)
+    app.state.symbols = parse_symbols(os.environ.get("SYMBOLS", "AAPL,MSFT,NVDA,TSLA"))
     app.state.aggregator = None
     if feed == "kafka":
         task = asyncio.create_task(consume_trades(app.state.broadcaster, app.state.feed))
@@ -47,8 +51,8 @@ async def lifespan(app: FastAPI):
         task = asyncio.create_task(run_flusher(app.state.aggregator, app.state.pool, interval))
     tasks = [task]
     if app.state.alpaca is not None and os.environ.get("RECONCILE_AT_UTC", "01:30") != "off":
-        symbols = parse_symbols(os.environ.get("SYMBOLS", "AAPL,MSFT,NVDA,TSLA"))
-        tasks.append(asyncio.create_task(run_schedule(app.state.pool, app.state.alpaca, symbols)))
+        tasks.append(asyncio.create_task(
+            run_schedule(app.state.pool, app.state.alpaca, app.state.symbols)))
     log.info("Trade feed: %s", feed)
     yield
     for t in tasks:
@@ -76,5 +80,6 @@ app.add_middleware(
 app.include_router(candles.router)
 app.include_router(health.router)
 app.include_router(market.router)
+app.include_router(quotes.router)
 app.include_router(stream.router)
 

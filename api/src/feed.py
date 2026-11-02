@@ -10,10 +10,14 @@ class FeedStats:
     trades_total: int = 0
     last_trade_at: float | None = None  # wall clock (time.time()) when last received
     started_at: float = field(default_factory=time.time)
+    last_trades: dict[str, tuple[float, int]] = field(default_factory=dict)  # (price, ts ms)
 
-    def record_trade(self) -> None:
+    def record_trade(self, symbol: str, price: float, ts: int) -> None:
         self.trades_total += 1
         self.last_trade_at = time.time()
+        previous = self.last_trades.get(symbol)
+        if previous is None or ts >= previous[1]:
+            self.last_trades[symbol] = (price, ts)
 
     def seconds_since_trade(self, now: float | None = None) -> float:
         """Since the last trade, or since startup if none arrived yet."""
