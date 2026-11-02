@@ -65,6 +65,20 @@ make backfill DAYS=5        # optional: historical 1m bars from Alpaca
 Without `--profile local` only `api` + `ingestion` start; point `PG_*` at a managed
 Postgres and host the frontend on Vercel. Measured memory: api ~55 MB, ingestion ~35 MB.
 
+## API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /candles?symbol=&interval=1m\|5m\|1h\|1d&limit=` | OHLCV candles, oldest first. `1d`: past days from Alpaca daily bars, today rolled up live |
+| `WS /ws/{symbol}` | Live trades for a tracked symbol |
+| `GET /quotes?symbols=` | Last price, change vs previous close, day range (Alpaca snapshot + live feed) |
+| `GET /market/status` | `pre` / `regular` / `post` / `closed` + next change, from the exchange calendar |
+| `GET /symbols`, `/symbols/details` | Tracked symbols (with company name and exchange) |
+| `GET /health`, `/health/feed` | Liveness + deployed version; data freshness (503 when the feed stalls) |
+
+Includes pre-market and after-hours. Live data comes from Alpaca's free IEX feed; a
+nightly reconcile replaces it with SIP bars (all exchanges) and fills any gaps.
+
 ## Deployment
 
 Production runs the lite stack on a free Oracle Cloud VM (1 GB RAM) behind Caddy, with
@@ -102,5 +116,6 @@ Step-by-step setup and operations: [`docs/runbook.md`](docs/runbook.md) (Thai).
 - [x] Alpaca source (real-time IEX trades) + historical 1m backfill
 - [ ] CI/CD (GitHub Actions → GHCR, SSH deploy) — workflows written, first run pending
 - [ ] Deploy: Oracle Cloud VM + Caddy + Vercel — see `docs/runbook.md`
+- [x] Backend hardening: market sessions, quotes, daily candles, reconcile, rate limits
 - [ ] Managed Postgres (Supabase) + watchlists
 - [ ] News summaries + alerts

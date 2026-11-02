@@ -28,8 +28,8 @@ async def sync_symbol_metadata(pool: asyncpg.Pool, alpaca: AlpacaClient,
     for symbol in symbols:
         try:
             asset = await alpaca.asset(symbol)
-        except Exception:
-            log.exception("Asset lookup failed for %s", symbol)
+        except Exception as exc:
+            log.warning("Asset lookup failed for %s: %s", symbol, exc)
             continue
         await pool.execute(
             "UPDATE symbols SET name = $2, exchange = $3, updated_at = now() WHERE symbol = $1",

@@ -1,6 +1,9 @@
 # Phase 2.5 — Backend & data hardening (ก่อนทำ UI)
 
-> สถานะ: **Approved — กำลังทำ** · Base: `master` (`bbfd135`) · Branch: `feat/phase-2.5-backend`
+> สถานะ: **Done (รอ deploy)** · Base: `master` (`bbfd135`) · Branch: `feat/phase-2.5-backend`
+>
+> หมายเหตุจากการทำ: ทำ B1 ก่อน A3 (เพราะ `/health/feed` ต้องรู้ session) · ระหว่างทำ C1 เจอและแก้บั๊กที่ `/ws/{symbol}`
+> ไม่รู้ตัวว่า client ปิด connection ไปแล้วตอนที่ไม่มี trade ไหลเข้ามา · ส่วนที่เรียก Alpaca ทดสอบด้วย HTTP จำลอง เพราะ sandbox เรียก Alpaca ไม่ได้
 
 ## เป้าหมาย
 
