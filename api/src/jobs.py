@@ -5,9 +5,11 @@ candles built from IEX trades with SIP bars (all exchanges, full volume).
 
     python -m src.jobs reconcile --days 2
 
-The API also runs it by itself (see run_schedule): once shortly after startup
-with the live feed, to patch gaps without mixing feeds intraday, and nightly
-at RECONCILE_AT_UTC with the history feed, after after-hours trading ends.
+The API also runs jobs by itself (see run_schedule):
+- shortly after startup, gap_fill: missing minutes from the live feed (never
+  overwriting), plus daily bars from the history feed;
+- nightly at RECONCILE_AT_UTC, after after-hours trading ends: reconcile with
+  the history feed, so every finished session ends up as SIP data.
 """
 
 import argparse
@@ -35,6 +37,13 @@ async def reconcile(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[str]
     await backfill_daily(pool, alpaca, symbols, max(days, 7), feed)
 
 
+async def gap_fill(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[str],
+                   live_feed: str) -> None:
+    await sync_symbol_metadata(pool, alpaca, symbols)
+    await backfill_minutes(pool, alpaca, symbols, 1, live_feed, overwrite=False)
+    await backfill_daily(pool, alpaca, symbols, 7, history_feed())
+
+
 def next_run(now: datetime, at_utc: time) -> datetime:
     """The next occurrence of `at_utc` strictly after `now`."""
     candidate = datetime.combine(now.date(), at_utc, tzinfo=UTC)
@@ -51,21 +60,21 @@ async def run_schedule(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[s
     at_utc = parse_hhmm(os.environ.get("RECONCILE_AT_UTC", "01:30"))
     live_feed = os.environ.get("ALPACA_FEED", "iex").lower()
 
-    async def attempt(days: float, feed: str) -> None:
+    async def attempt(name: str, job) -> None:
         try:
-            await reconcile(pool, alpaca, symbols, days, feed)
+            await job
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("Reconcile (%s days, feed=%s) failed", days, feed)
+            log.exception("%s failed", name)
 
     await asyncio.sleep(float(os.environ.get("RECONCILE_STARTUP_DELAY_SEC", "30")))
-    await attempt(1, live_feed)
+    await attempt("Startup gap fill", gap_fill(pool, alpaca, symbols, live_feed))
     while True:
         wake = next_run(datetime.now(UTC), at_utc)
         log.info("Next reconcile at %s", wake.isoformat())
         await asyncio.sleep((wake - datetime.now(UTC)).total_seconds())
-        await attempt(2, history_feed())
+        await attempt("Nightly reconcile", reconcile(pool, alpaca, symbols, 2, history_feed()))
 
 
 async def _cli(days: float, feed: str, symbols: list[str]) -> None:

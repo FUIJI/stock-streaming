@@ -48,17 +48,27 @@ async def fetch_bars(alpaca: AlpacaClient, symbols: list[str], timeframe: str,
         return await alpaca.bars(symbols, timeframe, start, end, "iex")
 
 
+# Gap filling: add minutes that are missing, never replace candles already stored.
+INSERT_MISSING_SQL = (UPSERT_SQL.split("ON CONFLICT")[0]
+                      + "ON CONFLICT (symbol, bucket_start) DO NOTHING")
+
+
 async def backfill_minutes(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[str],
-                           days: float, feed: str, now: datetime | None = None) -> int:
-    """Upsert 1-minute bars for the last `days` days; returns the number of rows."""
+                           days: float, feed: str, now: datetime | None = None,
+                           overwrite: bool = True) -> int:
+    """Write 1-minute bars for the last `days` days; returns the number of bars fetched.
+
+    overwrite=False only fills holes, so a lower-quality feed (IEX) can patch
+    downtime without degrading candles that a SIP reconcile already wrote.
+    """
     now = (now or datetime.now(UTC)).replace(second=0, microsecond=0)
     end = now - SAFETY_MARGIN.get(feed, SAFETY_MARGIN["sip"])
     start = end - timedelta(days=days)
     rows = bars_to_rows(await fetch_bars(alpaca, symbols, "1Min", start, end, feed))
     if rows:
-        await pool.executemany(UPSERT_SQL, rows)
-    log.info("1m: upserted %d bars for %s (%s -> %s, feed=%s)", len(rows), symbols,
-             start, end, feed)
+        await pool.executemany(UPSERT_SQL if overwrite else INSERT_MISSING_SQL, rows)
+    log.info("1m: %s %d bars for %s (%s -> %s, feed=%s)",
+             "upserted" if overwrite else "gap-filled from", len(rows), symbols, start, end, feed)
     return len(rows)
 
 
