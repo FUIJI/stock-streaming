@@ -1,38 +1,86 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 
 import CandlestickChart from "@/components/CandlestickChart";
-import SymbolSelector from "@/components/SymbolSelector";
-import { fetchSymbols } from "@/lib/api";
+import IntervalSelector from "@/components/IntervalSelector";
+import MarketStatusBadge from "@/components/MarketStatusBadge";
+import QuoteCards from "@/components/QuoteCards";
+import { usePolling } from "@/hooks/usePolling";
+import { useTheme } from "@/hooks/useTheme";
+import {
+  type Interval,
+  type Quote,
+  type SymbolInfo,
+  fetchMarketStatus,
+  fetchQuotes,
+  fetchSymbolDetails,
+} from "@/lib/api";
+import { shortCompanyName } from "@/lib/format";
 
 const DEFAULT_SYMBOLS = ["AAPL", "MSFT", "NVDA", "TSLA"];
 
-export default function Home() {
-  const [symbols, setSymbols] = useState<string[]>(DEFAULT_SYMBOLS);
-  const [symbol, setSymbol] = useState(DEFAULT_SYMBOLS[0]);
+function bySymbol<T extends { symbol: string }>(rows: T[] | null): Record<string, T> {
+  return Object.fromEntries((rows ?? []).map((row) => [row.symbol, row]));
+}
 
-  useEffect(() => {
-    fetchSymbols()
-      .then((available) => {
-        if (available.length > 0) {
-          setSymbols(available);
-          setSymbol((current) => (available.includes(current) ? current : available[0]));
-        }
-      })
-      .catch(() => {
-        // API not up yet — keep defaults, chart shows its own error state.
-      });
-  }, []);
+export default function Home() {
+  const market = usePolling(fetchMarketStatus, 60_000);
+  const quotes = usePolling(fetchQuotes, 15_000);
+  const symbolInfo = usePolling(fetchSymbolDetails, 300_000);
+
+  const symbols = symbolInfo.data?.length
+    ? symbolInfo.data.map((s) => s.symbol)
+    : DEFAULT_SYMBOLS;
+  const details = useMemo(() => bySymbol<SymbolInfo>(symbolInfo.data), [symbolInfo.data]);
+  const quoteMap = useMemo(() => bySymbol<Quote>(quotes.data), [quotes.data]);
+
+  const [chosen, setChosen] = useState(DEFAULT_SYMBOLS[0]);
+  const symbol = symbols.includes(chosen) ? chosen : symbols[0];
+  const [interval, setChartInterval] = useState<Interval>("1m");
+  const [theme, toggleTheme] = useTheme();
 
   return (
     <main className="dashboard">
       <header className="dashboard-header">
-        <h1>Stock Streaming Platform</h1>
-        <p>Real-time OHLCV · Redpanda → Spark → TimescaleDB → FastAPI</p>
+        <div>
+          <h1>Stock Streaming</h1>
+          <p>US equities incl. pre-market &amp; after-hours · live trades via Alpaca (IEX)</p>
+        </div>
+        <div className="header-actions">
+          <MarketStatusBadge status={market.data} failed={market.failed} />
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            title={theme === "dark" ? "Light theme" : "Dark theme"}
+          >
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+        </div>
       </header>
-      <SymbolSelector symbols={symbols} value={symbol} onChange={setSymbol} />
-      <CandlestickChart symbol={symbol} />
+
+      <QuoteCards
+        symbols={symbols}
+        details={details}
+        quotes={quoteMap}
+        selected={symbol}
+        onSelect={setChosen}
+      />
+      {quotes.failed && !quotes.data && (
+        <p className="notice">Prices are unavailable right now; the chart below still works.</p>
+      )}
+
+      <CandlestickChart
+        symbol={symbol}
+        name={shortCompanyName(details[symbol]?.name)}
+        interval={interval}
+        session={market.data?.session ?? null}
+        prevClose={quoteMap[symbol]?.prev_close}
+        theme={theme}
+        toolbar={<IntervalSelector value={interval} onChange={setChartInterval} />}
+      />
     </main>
   );
 }
