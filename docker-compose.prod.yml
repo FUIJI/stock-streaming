@@ -64,6 +64,9 @@ services:
       ALPACA_FEED: ${ALPACA_FEED:-iex}
       ALPACA_HISTORY_FEED: ${ALPACA_HISTORY_FEED:-sip}
       RECONCILE_AT_UTC: ${RECONCILE_AT_UTC:-01:30}
+      # News for tracked symbols (docs/specs/phase-3c-news.md); 0 disables polling
+      NEWS_POLL_SEC: ${NEWS_POLL_SEC:-60}
+      NEWS_BACKFILL_DAYS: ${NEWS_BACKFILL_DAYS:-3}
       SYMBOLS: ${SYMBOLS:-AAPL,MSFT,NVDA,TSLA}
     ports:
       - "${API_BIND:-127.0.0.1}:8000:8000"

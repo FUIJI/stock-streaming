@@ -57,6 +57,15 @@ class AlpacaClient:
         return await self._get(self._data, "/v2/stocks/snapshots",
                                {"symbols": ",".join(symbols), "feed": feed})
 
+    async def news(self, symbols: list[str], start: datetime, page_token: str | None = None,
+                   limit: int = 50) -> dict:
+        """One page of news (oldest first) tagged with any of `symbols`, created since `start`."""
+        params = {"symbols": ",".join(symbols), "start": start.isoformat(), "sort": "asc",
+                  "limit": limit, "include_content": "false"}
+        if page_token:
+            params["page_token"] = page_token
+        return await self._get(self._data, "/v1beta1/news", params)
+
     async def bars(self, symbols: list[str], timeframe: str, start: datetime, end: datetime,
                    feed: str) -> dict[str, list[dict]]:
         """All bars in [start, end], following next_page_token; keyed by symbol."""

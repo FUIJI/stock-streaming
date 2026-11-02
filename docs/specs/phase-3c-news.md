@@ -1,6 +1,8 @@
 # Phase 3c — ข่าวหุ้น + สรุปด้วย LLM + แจ้งเตือน
 
-> สถานะ: **Draft — รอ review** · Branch: `feat/news` · ตัดสินใจครบจากการ grilling (Q1–Q18)
+> สถานะ: **Approved — กำลังทำ** · Branch: `feat/news` · ตัดสินใจครบจากการ grilling (Q1–Q18)
+>
+> วิธีทดสอบ: เขียน test ไปพร้อมโค้ด (ส่วนที่มี logic ชัดเจนเขียน test ก่อน)
 
 ## เป้าหมาย
 ระหว่างวันเปิดหน้าเดียวแล้วรู้ทันทีว่า **หุ้นที่ติดตามมีข่าวสำคัญอะไร ข่าวนั้นดีหรือร้าย และราคาตอบสนองจริงไหม**
@@ -26,9 +28,9 @@ Alpaca News REST ──(ทุก 60 วินาที; ตอนเริ่�
 | Q3 | ขอบเขต | เฉพาะหุ้นที่ติดตาม (`SYMBOLS`) |
 | Q4 | ภาษา | สรุปภาษาไทย · หัวข่าวภาษาอังกฤษพร้อมลิงก์ต้นฉบับ |
 | — | แหล่งข่าว | Alpaca News `/v1beta1/news` (ยืนยันแล้วว่าใช้กับแผนฟรีได้) · `content` ว่าง ได้แค่ `headline` + `summary` · ต้องแปลง HTML entity |
-| Q5 | Provider | Gemini Flash ผ่าน `LLMProvider` interface (`LLM_PROVIDER`, `LLM_MODEL` เปลี่ยนได้ด้วย env) |
+| Q5 | Provider | Gemini ผ่าน `LLMProvider` interface · `LLM_MODEL=gemini-3.8-flash` (ชื่อจาก AI Studio ของผู้ใช้) · เรียกผ่าน REST `generateContent` ด้วย httpx (ไม่เพิ่ม SDK) · ไม่เปิด Google Search grounding |
 | Q6 | Output ต่อข่าว | `summary_th`, `why_it_matters`, `category`, `importance` 1–5, `is_market_wide`, `per_symbol[{symbol, relevance 0–1, sentiment −1..1}]` |
-| Q7 | การเรียก LLM | ชุดละ ≤10 ข่าว · ถ้าชุดเสียแตกเป็นทีละข่าว · structured output + Pydantic · temperature 0 |
+| Q7 | การเรียก LLM | ชุดละ ≤10 ข่าว · ถ้าชุดเสียแตกเป็นทีละข่าว · structured output + Pydantic · temperature ตั้งได้ด้วย `LLM_TEMPERATURE` (เดิมตกลงไว้ที่ 0 แต่ Gemini รุ่น 3 อาจแนะนำให้ใช้ค่าเริ่มต้น ยังยืนยันไม่ได้ ใช้ eval ตัดสิน) · `LLM_THINKING_LEVEL` ตั้งได้ |
 | Q8 | Pipeline | เก็บข่าวดิบก่อน · `pending → done / failed` · retry 3 ครั้งแบบ backoff · บันทึก `model` + `prompt_version` · ประมวลผลใหม่เมื่อ `updated_at` เปลี่ยน · ดึงย้อนหลัง 3 วันตอนเริ่ม |
 | Q9 | วัดคุณภาพ | ชุดทดสอบ 20 ข่าวจริง (ผู้ใช้ติดป้าย) + `python -m src.news.eval` |
 | Q10 | importance | เกณฑ์ 1–5 อยู่ใน prompt (ตารางด้านล่าง) + กฎในโค้ด: relevance สูงสุด < 0.5 หรือ `market_roundup` → importance สูงสุด 2 |
