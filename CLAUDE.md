@@ -35,6 +35,9 @@ ingestion (`TRADE_SINK=api`) → api WS `/internal/ingest` (`TRADE_FEED=ingest`,
   `docker compose run --rm --no-deps --entrypoint python3 spark-ohlcv -m pytest tests/ -q`
 - Lite stack: `make lite-up` / `make lite-down` / `make lite-logs`; `make backfill DAYS=5` (Alpaca)
 - No `make` on this machine? Use `docker compose up -d --build` etc. directly.
+- Production (Oracle VM): `.github/workflows/deploy.yml` deploys on green CI on `master`;
+  VM-side files live in `deploy/`; operations in `docs/runbook.md`. VM RAM is ~1 GB: keep
+  `deploy/compose.vm.yml` mem_limits ≤ 512 MB total.
 - uv.lock files are written by uv 0.6.3 (the Dockerfiles' version): relock with `uvx uv@0.6.3 lock`.
 
 ## Conventions

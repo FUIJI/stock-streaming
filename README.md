@@ -65,6 +65,21 @@ make backfill DAYS=5        # optional: historical 1m bars from Alpaca
 Without `--profile local` only `api` + `ingestion` start; point `PG_*` at a managed
 Postgres and host the frontend on Vercel. Measured memory: api ~55 MB, ingestion ~35 MB.
 
+## Deployment
+
+Production runs the lite stack on a free Oracle Cloud VM (1 GB RAM) behind Caddy, with
+the dashboard on Vercel:
+
+- **CI** (`.github/workflows/ci.yml`): ruff + pytest per service, compose validation
+- **Deploy** (`.github/workflows/deploy.yml`): after CI passes on `master`, build images
+  to GHCR, pull + restart on the VM over SSH, then wait for `/health` to report the new
+  version. Rollback = re-run with an earlier `image_tag`.
+- **VM setup**: `deploy/bootstrap.sh` (swap, Docker network), `deploy/caddy/` (HTTPS,
+  `/internal/*` blocked at the edge), `deploy/compose.vm.yml` (Postgres tuned to ~45 MB,
+  512 MB total memory limit)
+
+Step-by-step setup and operations: [`docs/runbook.md`](docs/runbook.md) (Thai).
+
 ## Design notes
 
 - **Event-time processing:** Spark aggregates OHLCV with 1-minute event-time windows
@@ -83,9 +98,9 @@ Postgres and host the frontend on Vercel. Measured memory: api ~55 MB, ingestion
 ## Roadmap
 
 - [x] Local stack: ingestion → Redpanda → Spark → TimescaleDB/MinIO → API → dashboard
-- [ ] CI/CD (GitHub Actions → GHCR, SSH deploy)
 - [x] Lite stack for small VMs (`docker-compose.prod.yml`)
 - [x] Alpaca source (real-time IEX trades) + historical 1m backfill
+- [ ] CI/CD (GitHub Actions → GHCR, SSH deploy) — workflows written, first run pending
+- [ ] Deploy: Oracle Cloud VM + Caddy + Vercel — see `docs/runbook.md`
 - [ ] Managed Postgres (Supabase) + watchlists
 - [ ] News summaries + alerts
-- [ ] Deploy: Oracle Cloud VM + Caddy
