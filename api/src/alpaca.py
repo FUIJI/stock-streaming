@@ -18,9 +18,9 @@ class AlpacaError(RuntimeError):
 
 class AlpacaClient:
     def __init__(self, api_key: str, api_secret: str, trading_url: str,
-                 transport: httpx.AsyncBaseTransport | None = None):
+                 transport: httpx.AsyncBaseTransport | None = None, data_url: str = DATA_URL):
         headers = {"APCA-API-KEY-ID": api_key, "APCA-API-SECRET-KEY": api_secret}
-        self._data = httpx.AsyncClient(base_url=DATA_URL, headers=headers, timeout=30,
+        self._data = httpx.AsyncClient(base_url=data_url, headers=headers, timeout=30,
                                        transport=transport)
         self._trading = httpx.AsyncClient(base_url=trading_url, headers=headers, timeout=30,
                                           transport=transport)
@@ -30,8 +30,10 @@ class AlpacaClient:
         key, secret = os.environ.get("ALPACA_API_KEY", ""), os.environ.get("ALPACA_API_SECRET", "")
         if not (key and secret):
             return None
+        # Both URLs are overridable so local development can point at a stub server.
         return cls(key, secret,
-                   os.environ.get("ALPACA_TRADING_URL", "https://paper-api.alpaca.markets"))
+                   os.environ.get("ALPACA_TRADING_URL", "https://paper-api.alpaca.markets"),
+                   data_url=os.environ.get("ALPACA_DATA_URL", DATA_URL))
 
     async def aclose(self) -> None:
         await self._data.aclose()
