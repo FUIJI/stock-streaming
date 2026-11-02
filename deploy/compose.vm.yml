@@ -1,0 +1,38 @@
+# VM override for docker-compose.prod.yml (Oracle 1 GB VM behind Caddy):
+#
+#   docker compose -f docker-compose.prod.yml -f deploy/compose.vm.yml up -d
+#
+# - Postgres runs here (decision D1) with settings sized for ~1 GB RAM
+# - The API is reachable only through Caddy on the shared `web` network
+#   (alias stock-api); nothing but Caddy listens on the host
+# - mem_limits add up to 512 MB: api 192 + ingestion 128 + postgres 192
+services:
+  postgres:
+    profiles: !reset []
+    ports: !reset []
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - max_connections=20
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=16MB
+    mem_limit: 192m
+
+  api:
+    ports: !reset []
+    networks:
+      default:
+      web:
+        aliases: [stock-api]
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+
+networks:
+  web:
+    external: true

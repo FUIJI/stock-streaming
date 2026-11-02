@@ -61,4 +61,5 @@ app.include_router(stream.router)
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    # version = deployed image tag; the deploy workflow waits for it to change.
+    return {"status": "ok", "version": os.environ.get("APP_VERSION", "dev")}

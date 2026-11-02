@@ -5,7 +5,15 @@
 # Standalone file, not an override: docker compose -f docker-compose.prod.yml ...
 #   --profile local   also runs Postgres + the dashboard on this machine (try it locally)
 #   without profile   api + ingestion only; point PG_* at Supabase/Neon, frontend on Vercel
+#   + deploy/compose.vm.yml   the Oracle VM setup (Postgres on the VM, API behind Caddy)
 name: stock-streaming-lite
+
+# Keep container logs from filling the disk (json-file is Docker's default driver).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 x-pg-env: &pg-env
   PG_HOST: ${PG_HOST:-postgres}
@@ -29,6 +37,7 @@ services:
       # Portable schema only — 002 is TimescaleDB-specific.
       - ./storage/timescale/init/001_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
     mem_limit: 256m
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stock} -d ${POSTGRES_DB:-stocks}"]
       interval: 10s
@@ -39,8 +48,11 @@ services:
 
   api:
     build: ./api
+    # Built locally by `up --build`; pulled from GHCR on the VM (IMAGE_TAG set by deploy).
+    image: ${IMAGE_REGISTRY:-ghcr.io/fuiji}/stock-streaming-api:${IMAGE_TAG:-latest}
     environment:
       <<: *pg-env
+      APP_VERSION: ${IMAGE_TAG:-dev}
       TRADE_FEED: ingest
       CANDLE_ROLLUP: sql
       INGEST_TOKEN: ${INGEST_TOKEN:?set INGEST_TOKEN in .env}
@@ -53,6 +65,7 @@ services:
     ports:
       - "${API_BIND:-127.0.0.1}:8000:8000"
     mem_limit: 192m
+    logging: *logging
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -67,6 +80,7 @@ services:
 
   ingestion:
     build: ./ingestion
+    image: ${IMAGE_REGISTRY:-ghcr.io/fuiji}/stock-streaming-ingestion:${IMAGE_TAG:-latest}
     environment:
       TRADE_SOURCE: ${TRADE_SOURCE:-simulator}
       TRADE_SINK: api
@@ -79,6 +93,7 @@ services:
       ALPACA_API_SECRET: ${ALPACA_API_SECRET:-}
       ALPACA_FEED: ${ALPACA_FEED:-iex}
     mem_limit: 128m
+    logging: *logging
     depends_on:
       api:
         condition: service_healthy
