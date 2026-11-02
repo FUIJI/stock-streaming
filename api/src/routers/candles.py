@@ -14,12 +14,42 @@ INTERVAL_SOURCES = {
     "1m": "ohlcv_1m",
     "5m": "ohlcv_5m",
     "1h": "ohlcv_1h",
+    "1d": "ohlcv_1d",
 }
 INTERVAL_WIDTHS = {
     "1m": timedelta(minutes=1),
     "5m": timedelta(minutes=5),
     "1h": timedelta(hours=1),
 }
+
+# Days before today come from Alpaca's daily bars; today (in New York) is rolled up
+# from the 1-minute candles so it moves with the live feed. Same in both rollup modes.
+DAILY_SQL = """
+    WITH today AS (
+        SELECT (date_trunc('day', now() AT TIME ZONE 'America/New_York')
+                AT TIME ZONE 'America/New_York') AS start
+    )
+    SELECT * FROM (
+        SELECT symbol, bucket_start, open, high, low, close, volume, trade_count
+        FROM ohlcv_1d, today
+        WHERE symbol = $1 AND bucket_start < today.start
+          AND ($2::timestamptz IS NULL OR bucket_start >= $2)
+          AND ($3::timestamptz IS NULL OR bucket_start <= $3)
+        UNION ALL
+        SELECT $1::text, today.start,
+               (array_agg(open ORDER BY bucket_start))[1],
+               max(high), min(low),
+               (array_agg(close ORDER BY bucket_start DESC))[1],
+               sum(volume), sum(trade_count)::bigint
+        FROM ohlcv_1m, today
+        WHERE symbol = $1 AND bucket_start >= today.start
+          AND ($2::timestamptz IS NULL OR today.start >= $2)
+          AND ($3::timestamptz IS NULL OR today.start <= $3)
+        GROUP BY today.start
+    ) days
+    ORDER BY bucket_start DESC
+    LIMIT $4
+"""
 
 # CANDLE_ROLLUP=sql: plain Postgres (Supabase/Neon have no continuous aggregates),
 # so coarser intervals are rolled up from ohlcv_1m at query time.
@@ -58,7 +88,9 @@ async def get_candles(
             detail=f"Unknown interval {interval!r}; expected one of {sorted(INTERVAL_SOURCES)}",
         )
     args = [symbol.upper(), start, end, limit]
-    if interval != "1m" and os.environ.get("CANDLE_ROLLUP", "timescale").lower() == "sql":
+    if interval == "1d":
+        query = DAILY_SQL
+    elif interval != "1m" and os.environ.get("CANDLE_ROLLUP", "timescale").lower() == "sql":
         query = ROLLUP_SQL
         args.append(INTERVAL_WIDTHS[interval])
     else:

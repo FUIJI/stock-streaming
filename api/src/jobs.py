@@ -19,7 +19,7 @@ from datetime import UTC, datetime, time, timedelta
 import asyncpg
 
 from .alpaca import AlpacaClient
-from .backfill import backfill_minutes, history_feed, parse_symbols
+from .backfill import backfill_daily, backfill_minutes, history_feed, parse_symbols
 from .db import create_pool
 from .migrate import migrate
 from .symbols import sync_symbol_metadata
@@ -31,6 +31,8 @@ async def reconcile(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[str]
                     days: float, feed: str) -> None:
     await sync_symbol_metadata(pool, alpaca, symbols)
     await backfill_minutes(pool, alpaca, symbols, days, feed)
+    # A week of daily bars also catches up after a long outage.
+    await backfill_daily(pool, alpaca, symbols, max(days, 7), feed)
 
 
 def next_run(now: datetime, at_utc: time) -> datetime:

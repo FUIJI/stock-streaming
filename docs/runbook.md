@@ -116,6 +116,8 @@ cd ~/docker/stock-streaming
 dc run --rm api python -m src.backfill --days 5
 ```
 
+(ดึงแท่ง 1 นาทีย้อนหลัง 5 วัน และแท่งรายวันย้อนหลัง 5 ปีด้วย `--daily-days 1825` ซึ่งเป็นค่าเริ่มต้น)
+
 ✅ `curl "https://api.fuiji-stock.duckdns.org/candles?symbol=AAPL&limit=3"` ได้แท่งเทียนกลับมา
 
 ### 1.8 Frontend บน Vercel
