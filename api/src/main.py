@@ -81,6 +81,9 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(","),
+    # e.g. https://stock-streaming-[a-z0-9]+-fuiji\.vercel\.app for Vercel preview deployments,
+    # whose URL changes on every deploy. Unset = exact CORS_ORIGINS only.
+    allow_origin_regex=os.environ.get("CORS_ORIGIN_REGEX") or None,
     allow_methods=["*"],
     allow_headers=["*"],
 )

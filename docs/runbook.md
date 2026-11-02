@@ -128,6 +128,9 @@ dc run --rm api python -m src.backfill --days 5
    (ไม่ต้องตั้ง WS URL เพราะ `useTradeStream.ts` แปลง `https` เป็น `wss` ให้อยู่แล้ว)
 4. Deploy แล้วจด URL ไว้ เช่น `https://stock-streaming-xxx.vercel.app`
 5. บน VM เพิ่ม URL นั้นใน `CORS_ORIGINS` ของ `.env` แล้วรัน `dc up -d api`
+   - ลิงก์ preview ของ Vercel (เช่น `stock-streaming-xxxx-fuiji.vercel.app`) เปลี่ยนทุกครั้งที่ deploy และจะโดน CORS บล็อก
+     ถ้าต้องการให้ใช้ได้ ให้ตั้ง `CORS_ORIGIN_REGEX=https://stock-streaming-[a-z0-9]+-fuiji\.vercel\.app` เพิ่ม
+   - อาการ CORS: REST ทุกตัว (กราฟ ราคา สถานะตลาด) โหลดไม่ได้ แต่ป้าย Live ยังเขียวอยู่ เพราะ WebSocket ไม่ถูกตรวจ CORS
 
 ✅ เปิด URL ของ Vercel แล้วกราฟโหลดได้ DevTools ไม่มี error เรื่อง CORS หรือ mixed content
 และระหว่างตลาดเปิด (20:30–03:00 น. หรือ 21:30–04:00 น. ตามเวลาไทย ขึ้นกับ daylight saving ของสหรัฐฯ) แท่งล่าสุดจะขยับเอง
