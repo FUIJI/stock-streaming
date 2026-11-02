@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { API_URL } from "@/lib/api";
 
@@ -11,11 +11,14 @@ export interface Trade {
   ts: number;
 }
 
+export type StreamStatus = "connecting" | "open" | "closed";
+
 const WS_BASE = (process.env.NEXT_PUBLIC_WS_URL ?? API_URL).replace(/^http/, "ws");
 
 /** Subscribes to live trades for a symbol; reconnects automatically. */
-export function useTradeStream(symbol: string, onTrade: (trade: Trade) => void) {
+export function useTradeStream(symbol: string, onTrade: (trade: Trade) => void): StreamStatus {
   const handlerRef = useRef(onTrade);
+  const [status, setStatus] = useState<StreamStatus>("connecting");
   useEffect(() => {
     handlerRef.current = onTrade;
   });
@@ -26,10 +29,14 @@ export function useTradeStream(symbol: string, onTrade: (trade: Trade) => void) 
     let disposed = false;
 
     const connect = () => {
+      setStatus("connecting");
       ws = new WebSocket(`${WS_BASE}/ws/${encodeURIComponent(symbol)}`);
+      ws.onopen = () => setStatus("open");
       ws.onmessage = (event) => handlerRef.current(JSON.parse(event.data));
       ws.onclose = () => {
-        if (!disposed) retryTimer = setTimeout(connect, 2000);
+        if (disposed) return;
+        setStatus("closed");
+        retryTimer = setTimeout(connect, 3000);
       };
     };
     connect();
@@ -40,4 +47,6 @@ export function useTradeStream(symbol: string, onTrade: (trade: Trade) => void) 
       ws?.close();
     };
   }, [symbol]);
+
+  return status;
 }

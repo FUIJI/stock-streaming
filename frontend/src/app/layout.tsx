@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { THEME_BOOTSTRAP } from "@/hooks/useTheme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Stock Streaming Dashboard",
-  description: "Real-time US stock candlestick dashboard",
+  title: "Stock Streaming",
+  description: "Real-time US stock prices with pre-market and after-hours, times in ICT",
 };
 
 export default function RootLayout({
@@ -23,7 +24,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    // suppressHydrationWarning: the bootstrap script may set data-theme before React hydrates.
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+      </head>
       <body>{children}</body>
     </html>
   );
