@@ -138,3 +138,29 @@ async def test_fenced_reply_like_gemmas_is_accepted():
     reply = "```json\n" + json.dumps({"items": [item_json(1, "AAPL")]}, indent=2) + "\n```"
     result = await analyze(FakeGemini(gemini_reply(reply)).provider(), ITEMS[:1], NAMES)
     assert list(result.done) == [1] and result.calls == 1
+
+
+async def test_output_is_capped_per_article_in_the_batch():
+    fake = FakeGemini(gemini_reply({"items": [item_json(1, "AAPL"), item_json(2, "MSFT")]}))
+    await analyze(fake.provider(), ITEMS, NAMES)
+    assert json.loads(fake.requests[0].content)["generationConfig"]["maxOutputTokens"] == \
+        1024 + 600 * 2
+
+
+async def test_hitting_the_token_limit_retries_articles_one_by_one():
+    cut_off = httpx.Response(200, json={"candidates": [
+        {"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": '{"items": [{"id": 1,'}]}}]})
+    fake = FakeGemini(cut_off,
+                      gemini_reply({"items": [item_json(1, "AAPL")]}),
+                      gemini_reply({"items": [item_json(2, "MSFT")]}))
+    result = await analyze(fake.provider(), ITEMS, NAMES)
+    assert sorted(result.done) == [1, 2] and result.calls == 3
+    single = json.loads(fake.requests[1].content)["generationConfig"]["maxOutputTokens"]
+    assert single == 1024 + 600
+
+
+def test_prompt_v2_sets_a_length_budget_and_format_rules():
+    from src.news.prompt import SYSTEM_PROMPT
+
+    assert "at most 2 short sentences" in SYSTEM_PROMPT
+    assert "No markdown, no code fences" in SYSTEM_PROMPT
