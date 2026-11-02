@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 
 from ..backfill import parse_symbols
 from ..db import create_pool
@@ -26,7 +27,10 @@ async def run(limit: int) -> None:
         rows = await pool.fetch("SELECT * FROM news ORDER BY created_at DESC LIMIT $1", limit)
         items = [to_item(r, tracked) for r in rows]
         print(f"provider={provider.name} model={provider.model} articles={len(items)}")
-        result = await analyze(provider, items, await company_names(pool))
+        names = await company_names(pool)
+        started = time.monotonic()
+        result = await analyze(provider, items, names)
+        elapsed = time.monotonic() - started
     finally:
         await pool.close()
         await provider.aclose()
@@ -41,7 +45,7 @@ async def run(limit: int) -> None:
                              ensure_ascii=False, indent=2))
         else:
             print("FAILED:", result.failed.get(item.id))
-    print(f"\nLLM calls: {result.calls}")
+    print(f"\nLLM calls: {result.calls} · {elapsed:.1f}s")
 
 
 def main() -> None:

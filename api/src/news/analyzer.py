@@ -1,6 +1,7 @@
 """Run a batch of articles through the LLM, falling back to one article per call."""
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -23,6 +24,13 @@ def extract_json(text: str) -> str:
     return _CLOSE_FENCE.sub("", _OPEN_FENCE.sub("", text.strip())).strip()
 
 
+def output_budget(articles: int) -> int:
+    """Output-token ceiling for a call. A normal answer is ~300 tokens per article; the base
+    leaves room for a thinking model's reasoning, which counts against the same limit."""
+    per_article = int(os.environ.get("LLM_MAX_TOKENS_PER_ARTICLE", "600"))
+    return int(os.environ.get("LLM_MAX_TOKENS_BASE", "1024")) + per_article * articles
+
+
 @dataclass
 class AnalyzeResult:
     done: dict[int, FinalAnalysis] = field(default_factory=dict)
@@ -34,7 +42,7 @@ async def _call(provider: LLMProvider, items: list[NewsItem], names: dict[str, s
                 result: AnalyzeResult) -> BatchAnalysis:
     result.calls += 1
     raw = await provider.generate_json(SYSTEM_PROMPT, build_user_message(items, names),
-                                       RESPONSE_SCHEMA)
+                                       RESPONSE_SCHEMA, max_tokens=output_budget(len(items)))
     try:
         return BatchAnalysis.model_validate_json(extract_json(raw))
     except ValidationError as exc:

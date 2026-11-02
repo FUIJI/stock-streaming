@@ -23,8 +23,10 @@ class LLMProvider(Protocol):
     name: str
     model: str
 
-    async def generate_json(self, system: str, user: str, schema: dict) -> str:
-        """Return the model's raw JSON text for `user`, constrained to `schema`."""
+    async def generate_json(self, system: str, user: str, schema: dict,
+                            max_tokens: int | None = None) -> str:
+        """Return the model's raw JSON text for `user`, constrained to `schema`.
+        Stops after `max_tokens` output tokens (an over-long answer is bad output)."""
         ...
 
     async def aclose(self) -> None: ...
@@ -45,8 +47,11 @@ class GeminiProvider:
         self._http = httpx.AsyncClient(base_url=base_url, timeout=timeout, transport=transport,
                                        headers={"x-goog-api-key": api_key})
 
-    async def generate_json(self, system: str, user: str, schema: dict) -> str:
+    async def generate_json(self, system: str, user: str, schema: dict,
+                            max_tokens: int | None = None) -> str:
         config: dict = {"responseMimeType": "application/json", "responseSchema": schema}
+        if max_tokens:
+            config["maxOutputTokens"] = max_tokens
         if self._temperature is not None:
             config["temperature"] = self._temperature
         if self._thinking_level:
@@ -68,7 +73,12 @@ class GeminiProvider:
             raise LLMError(f"Gemini {resp.status_code}: {resp.text[:300]}",
                            retryable=resp.status_code == 429 or resp.status_code >= 500)
         try:
-            parts = resp.json()["candidates"][0]["content"]["parts"]
+            candidate = resp.json()["candidates"][0]
+            if candidate.get("finishReason") == "MAX_TOKENS":
+                # Cut off mid-answer (often a model repeating itself): a smaller batch may fit.
+                raise LLMError("Gemini hit the output token limit", retryable=True,
+                               bad_output=True)
+            parts = candidate["content"]["parts"]
             # Thinking models may return thought parts first; the answer is the rest.
             return "".join(p.get("text", "") for p in parts if not p.get("thought"))
         except (KeyError, IndexError, ValueError) as exc:

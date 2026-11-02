@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 Category = Literal[
     "earnings", "guidance", "analyst", "product", "legal_regulatory", "m_and_a",
@@ -43,8 +43,9 @@ class SymbolAssessment(BaseModel):
 
 class NewsAnalysis(BaseModel):
     id: int
-    summary_th: str = Field(min_length=1)
-    why_it_matters: str = Field(min_length=1)
+    # Generous ceilings: the prompt asks for far less; these only catch runaway text.
+    summary_th: str = Field(min_length=1, max_length=600)
+    why_it_matters: str = Field(min_length=1, max_length=300)
     category: Category
     importance: int = Field(ge=1, le=5)
     is_market_wide: bool
