@@ -1,0 +1,38 @@
+# Replacement for ~/docker/lab/docker-compose.yml: same resume site + Caddy,
+# plus Caddy joins the shared `web` network (created by deploy/bootstrap.sh)
+# so it can reach the stock API at stock-api:8000.
+services:
+  resume:
+    image: nginx:alpine
+    container_name: resume-site
+    volumes:
+      - ./resume:/usr/share/nginx/html:ro
+    restart: always
+
+  caddy:
+    image: caddy:alpine
+    container_name: caddy-proxy
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in ~/docker/lab/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - default
+      - web
+    depends_on:
+      - resume
+    restart: always
+
+networks:
+  web:
+    external: true
+
+volumes:
+  caddy_data:
+  caddy_config:

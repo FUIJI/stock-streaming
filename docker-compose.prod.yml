@@ -1,0 +1,112 @@
+# Lite stack for small VMs (~1 GB RAM): no Redpanda, Spark or MinIO.
+#
+#   ingestion --WS /internal/ingest--> api (in-memory 1m candles + live fan-out) --> Postgres
+#
+# Standalone file, not an override: docker compose -f docker-compose.prod.yml ...
+#   --profile local   also runs Postgres + the dashboard on this machine (try it locally)
+#   without profile   api + ingestion only; point PG_* at Supabase/Neon, frontend on Vercel
+#   + deploy/compose.vm.yml   the Oracle VM setup (Postgres on the VM, API behind Caddy)
+name: stock-streaming-lite
+
+# Keep container logs from filling the disk (json-file is Docker's default driver).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-pg-env: &pg-env
+  PG_HOST: ${PG_HOST:-postgres}
+  PG_PORT: ${PG_PORT:-5432}
+  PG_DB: ${POSTGRES_DB:-stocks}
+  PG_USER: ${POSTGRES_USER:-stock}
+  PG_PASSWORD: ${POSTGRES_PASSWORD:-stock_dev_password}
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    profiles: [local]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stock}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stock_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-stocks}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Portable schema only — 002 is TimescaleDB-specific.
+      - ./storage/timescale/init/001_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    mem_limit: 256m
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stock} -d ${POSTGRES_DB:-stocks}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    # Built locally by `up --build`; pulled from GHCR on the VM (IMAGE_TAG set by deploy).
+    image: ${IMAGE_REGISTRY:-ghcr.io/fuiji}/stock-streaming-api:${IMAGE_TAG:-latest}
+    environment:
+      <<: *pg-env
+      APP_VERSION: ${IMAGE_TAG:-dev}
+      TRADE_FEED: ingest
+      CANDLE_ROLLUP: sql
+      INGEST_TOKEN: ${INGEST_TOKEN:?set INGEST_TOKEN in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Only used by the one-shot backfill: docker compose ... run --rm api python -m src.backfill
+      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+      ALPACA_API_SECRET: ${ALPACA_API_SECRET:-}
+      ALPACA_FEED: ${ALPACA_FEED:-iex}
+      SYMBOLS: ${SYMBOLS:-AAPL,MSFT,NVDA,TSLA}
+    ports:
+      - "${API_BIND:-127.0.0.1}:8000:8000"
+    mem_limit: 192m
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+  ingestion:
+    build: ./ingestion
+    image: ${IMAGE_REGISTRY:-ghcr.io/fuiji}/stock-streaming-ingestion:${IMAGE_TAG:-latest}
+    environment:
+      TRADE_SOURCE: ${TRADE_SOURCE:-simulator}
+      TRADE_SINK: api
+      API_INGEST_URL: ws://api:8000/internal/ingest
+      INGEST_TOKEN: ${INGEST_TOKEN:?set INGEST_TOKEN in .env}
+      SYMBOLS: ${SYMBOLS:-AAPL,MSFT,NVDA,TSLA}
+      SIM_TRADES_PER_SEC: ${SIM_TRADES_PER_SEC:-5}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      ALPACA_API_KEY: ${ALPACA_API_KEY:-}
+      ALPACA_API_SECRET: ${ALPACA_API_SECRET:-}
+      ALPACA_FEED: ${ALPACA_FEED:-iex}
+    mem_limit: 128m
+    logging: *logging
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    profiles: [local]
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

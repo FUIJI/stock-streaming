@@ -1,0 +1,127 @@
+name: Deploy
+
+# master: CI passes -> build images -> push to GHCR -> deploy to the VM -> health check.
+# Rollback: Actions -> Deploy -> Run workflow, image_tag = an earlier sha-xxxxxxx.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Deploy this existing tag (e.g. sha-1a2b3c4) without building. Empty = build and deploy master."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  APP_DIR: docker/stock-streaming # relative to the VM user's home
+  HEALTH_URL: https://api.fuiji-stock.duckdns.org/health
+
+jobs:
+  build:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && inputs.image_tag == '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - id: meta
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "tag=sha-${sha::7}" >> "$GITHUB_OUTPUT"
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push api
+        uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.registry }}/stock-streaming-api:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.registry }}/stock-streaming-api:latest
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build and push ingestion
+        uses: docker/build-push-action@v6
+        with:
+          context: ./ingestion
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.registry }}/stock-streaming-ingestion:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.registry }}/stock-streaming-ingestion:latest
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=ingestion
+          cache-to: type=gha,scope=ingestion,mode=max
+
+  deploy:
+    needs: build
+    # Runs after a successful build, or alone for a rollback to an existing tag.
+    if: >-
+      always() && (needs.build.result == 'success' ||
+      (needs.build.result == 'skipped' && github.event_name == 'workflow_dispatch' && inputs.image_tag != ''))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      TAG: ${{ inputs.image_tag || needs.build.outputs.tag }}
+      VM_HOST: ${{ secrets.VM_HOST }}
+      VM_USER: ${{ secrets.VM_USER }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Configure SSH
+        env:
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Prefer the pinned host key; fall back to trust-on-first-use.
+          if [[ -n $VM_KNOWN_HOSTS ]]; then
+            printf '%s\n' "$VM_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$VM_HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: Copy compose files to the VM
+        run: |
+          # shellcheck disable=SC2029  # APP_DIR is meant to expand here, on the runner
+          tar czf - docker-compose.prod.yml deploy/compose.vm.yml storage/timescale/init/001_schema.sql \
+            | ssh "$VM_USER@$VM_HOST" "mkdir -p ~/$APP_DIR && tar xzf - -C ~/$APP_DIR"
+
+      - name: Pull images and restart (${{ env.TAG }})
+        run: |
+          # shellcheck disable=SC2029  # TAG/APP_DIR are arguments for the remote script
+          ssh "$VM_USER@$VM_HOST" "bash -s -- $TAG $APP_DIR" < deploy/remote-deploy.sh
+
+      - name: Health check
+        run: deploy/healthcheck.sh "$HEALTH_URL" "$TAG" 120

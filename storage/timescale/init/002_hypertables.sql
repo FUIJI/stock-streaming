@@ -1,3 +1,7 @@
+-- Our bind mount replaces the image's /docker-entrypoint-initdb.d (which is what
+-- normally creates the extension), so create it here explicitly.
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
 SELECT create_hypertable(
     'ohlcv_1m',
     by_range('bucket_start', INTERVAL '7 days'),

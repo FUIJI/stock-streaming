@@ -1,6 +1,7 @@
 COMPOSE = docker compose
+LITE = docker compose -f docker-compose.prod.yml --profile local
 
-.PHONY: up down restart logs ps test psql topics clean
+.PHONY: up down restart logs ps test psql topics clean lite-up lite-down lite-logs backfill
 
 up:
 	$(COMPOSE) up -d --build
@@ -30,3 +31,17 @@ topics:
 # Wipe everything including data volumes
 clean:
 	$(COMPOSE) down -v
+
+# ---------- Lite stack (no Redpanda/Spark/MinIO) ----------
+lite-up:
+	$(LITE) up -d --build
+
+lite-down:
+	$(LITE) down
+
+lite-logs:
+	$(LITE) logs -f --tail=100
+
+# Historical 1m bars from Alpaca, e.g. make backfill DAYS=10
+backfill:
+	$(LITE) run --rm api python -m src.backfill --days $(or $(DAYS),5)

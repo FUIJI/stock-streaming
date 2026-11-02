@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
@@ -61,3 +61,20 @@ async def test_get_candles_uses_cagg_table(client_with_pool):
     resp = await client.get("/candles", params={"symbol": "AAPL", "interval": "5m"})
     assert resp.status_code == 200
     assert "ohlcv_5m" in pool.calls[0][0]
+
+
+async def test_sql_rollup_queries_ohlcv_1m_with_date_bin(client_with_pool, monkeypatch):
+    monkeypatch.setenv("CANDLE_ROLLUP", "sql")
+    client, pool = client_with_pool
+    resp = await client.get("/candles", params={"symbol": "AAPL", "interval": "1h"})
+    assert resp.status_code == 200
+    query, args = pool.calls[0]
+    assert "date_bin" in query and "FROM ohlcv_1m" in query
+    assert args[-1] == timedelta(hours=1)
+
+
+async def test_sql_rollup_keeps_1m_on_base_table(client_with_pool, monkeypatch):
+    monkeypatch.setenv("CANDLE_ROLLUP", "sql")
+    client, pool = client_with_pool
+    await client.get("/candles", params={"symbol": "AAPL", "interval": "1m"})
+    assert "date_bin" not in pool.calls[0][0]

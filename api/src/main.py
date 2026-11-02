@@ -6,22 +6,43 @@ from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .aggregator import CandleAggregator, flush_candles, load_recent_candles, run_flusher
 from .db import create_pool
 from .routers import candles, stream
 from .routers.stream import TradeBroadcaster, consume_trades
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("api")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # kafka: full stack, trades come from Redpanda and Spark writes candles.
+    # ingest: lite mode, ingestion pushes to /internal/ingest and we aggregate candles here.
+    feed = os.environ.get("TRADE_FEED", "kafka").lower()
+    if feed not in ("kafka", "ingest"):
+        raise RuntimeError(f"Unknown TRADE_FEED: {feed!r} (expected kafka|ingest)")
+    if feed == "ingest" and not os.environ.get("INGEST_TOKEN"):
+        raise RuntimeError("TRADE_FEED=ingest requires INGEST_TOKEN")
+
     app.state.pool = await create_pool()
     app.state.broadcaster = TradeBroadcaster()
-    consumer_task = asyncio.create_task(consume_trades(app.state.broadcaster))
+    app.state.aggregator = None
+    if feed == "kafka":
+        task = asyncio.create_task(consume_trades(app.state.broadcaster))
+    else:
+        app.state.aggregator = CandleAggregator()
+        app.state.aggregator.seed(await load_recent_candles(app.state.pool))
+        interval = float(os.environ.get("CANDLE_FLUSH_SEC", "2"))
+        task = asyncio.create_task(run_flusher(app.state.aggregator, app.state.pool, interval))
+    log.info("Trade feed: %s", feed)
     yield
-    consumer_task.cancel()
+    task.cancel()
     with suppress(asyncio.CancelledError):
-        await consumer_task
+        await task
+    if app.state.aggregator is not None:
+        with suppress(Exception):
+            await flush_candles(app.state.aggregator, app.state.pool)
     await app.state.pool.close()
 
 
@@ -40,4 +61,5 @@ app.include_router(stream.router)
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    # version = deployed image tag; the deploy workflow waits for it to change.
+    return {"status": "ok", "version": os.environ.get("APP_VERSION", "dev")}

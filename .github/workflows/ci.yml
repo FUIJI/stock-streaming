@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: ${{ matrix.service }} (ruff + pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [ingestion, api]
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.6.3" # same uv as the Dockerfiles; uv.lock is written by it
+          enable-cache: true
+          cache-dependency-glob: ${{ matrix.service }}/uv.lock
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  compose:
+    name: compose config
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate lite stack (local profile)
+        run: docker compose -f docker-compose.prod.yml --env-file .env.example --profile local config -q
+      - name: Validate VM override
+        run: |
+          docker network create web
+          docker compose -f docker-compose.prod.yml -f deploy/compose.vm.yml \
+            --env-file deploy/env.vm.example config -q

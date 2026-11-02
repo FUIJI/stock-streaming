@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 from collections import defaultdict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -81,3 +82,34 @@ async def ws_trades(websocket: WebSocket, symbol: str) -> None:
         pass
     finally:
         broadcaster.unsubscribe(symbol, queue)
+
+
+@router.websocket("/internal/ingest")
+async def ws_ingest(websocket: WebSocket) -> None:
+    """Lite mode (TRADE_FEED=ingest): the ingestion service pushes trades here directly.
+
+    Same JSON as the Kafka messages. Each trade is fanned out to /ws/{symbol}
+    subscribers and folded into the 1-minute candle aggregator.
+    """
+    aggregator = getattr(websocket.app.state, "aggregator", None)
+    token = os.environ.get("INGEST_TOKEN", "")
+    supplied = websocket.headers.get("authorization", "").removeprefix("Bearer ")
+    if aggregator is None or not token or not secrets.compare_digest(supplied, token):
+        await websocket.close(code=1008)  # rejected during the handshake (HTTP 403)
+        return
+
+    await websocket.accept()
+    broadcaster: TradeBroadcaster = websocket.app.state.broadcaster
+    try:
+        async for payload in websocket.iter_text():
+            try:
+                trade = json.loads(payload)
+                symbol = str(trade["symbol"])
+                aggregator.add(symbol, float(trade["price"]), float(trade["volume"]),
+                               int(trade["ts"]))
+            except (ValueError, KeyError, TypeError):
+                log.warning("Dropping malformed trade: %.200s", payload)
+                continue
+            broadcaster.publish(symbol, payload)
+    except WebSocketDisconnect:
+        pass

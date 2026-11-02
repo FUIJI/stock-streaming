@@ -1,0 +1,19 @@
+# Reverse proxy for everything on the VM. Lives in ~/docker/lab next to the
+# resume site; `caddy-proxy` must be attached to the shared `web` network to
+# reach the stock API (see docker-compose.yml in this folder).
+#
+# Caddy gets and renews Let's Encrypt certificates for both hosts automatically
+# and redirects HTTP to HTTPS. WebSocket upgrades pass through reverse_proxy.
+{
+	email {$ACME_EMAIL}
+}
+
+fuiji-stock.duckdns.org {
+	reverse_proxy resume:80
+}
+
+api.fuiji-stock.duckdns.org {
+	# Ingestion -> API traffic stays on the Docker network; never expose it.
+	respond /internal/* 404
+	reverse_proxy stock-api:8000
+}

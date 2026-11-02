@@ -1,0 +1,186 @@
+# Runbook — Lite stack บน Oracle VM
+
+คู่มือ deploy และดูแลระบบ production ของ lite stack
+(สถาปัตยกรรมและเหตุผลการตัดสินใจอยู่ใน [`docs/specs/phase-2-deploy.md`](specs/phase-2-deploy.md))
+
+| รายการ | ค่า |
+|---|---|
+| VM | Oracle Always Free x86_64, user `ubuntu`, IP `140.245.108.27` |
+| เว็บเรซูเม่ | https://fuiji-stock.duckdns.org (`~/docker/lab`) |
+| API | https://api.fuiji-stock.duckdns.org (`~/docker/stock-streaming`) |
+| Dashboard | Vercel (root directory `frontend/`) |
+| Images | `ghcr.io/fuiji/stock-streaming-{api,ingestion}:sha-xxxxxxx` |
+
+คำสั่ง compose บน VM ทั้งหมดในเอกสารนี้รันใน `~/docker/stock-streaming` และใช้ alias นี้:
+
+```bash
+alias dc='docker compose -f docker-compose.prod.yml -f deploy/compose.vm.yml'
+```
+
+---
+
+## 1. ตั้งค่าครั้งแรก
+
+ทำตามลำดับ แต่ละขั้นมีวิธีตรวจผลอยู่ท้ายขั้น
+
+### 1.1 เตรียม VM
+
+```bash
+git clone https://github.com/FUIJI/stock-streaming.git ~/src/stock-streaming
+cd ~/src/stock-streaming
+bash deploy/bootstrap.sh
+```
+
+✅ `free -h` แสดง Swap 2.0Gi และ `docker network ls` มี `web`
+
+### 1.2 Caddy: เปิด HTTPS และ route ไป API
+
+**ผลกระทบ:** เว็บเรซูเม่จะดับไม่กี่วินาทีระหว่าง recreate container ของ Caddy
+
+```bash
+cd ~/docker/lab
+cp Caddyfile Caddyfile.bak && cp docker-compose.yml docker-compose.yml.bak
+cp ~/src/stock-streaming/deploy/caddy/Caddyfile ~/src/stock-streaming/deploy/caddy/docker-compose.yml .
+echo "ACME_EMAIL=<อีเมลของคุณ>" > .env    # Let's Encrypt ใช้แจ้งเตือนเรื่องใบรับรอง
+docker compose up -d
+docker logs caddy-proxy --tail 30             # ควรเห็น "certificate obtained successfully"
+```
+
+✅ ตรวจผล:
+- `curl -I https://fuiji-stock.duckdns.org` ได้ 200
+- `curl -I http://fuiji-stock.duckdns.org` ถูก redirect ไป HTTPS
+- `https://api.fuiji-stock.duckdns.org` จะได้ 502 จนกว่าจะ deploy API ในขั้น 1.6 ซึ่งเป็นเรื่องปกติ
+
+**Rollback:** `mv Caddyfile.bak Caddyfile && mv docker-compose.yml.bak docker-compose.yml && docker compose up -d`
+
+> พอร์ต 443/UDP (HTTP/3) ไม่จำเป็นต้องเปิดใน Security List ถ้าไม่เปิด browser จะใช้ HTTP/2 ผ่าน TCP แทน
+
+### 1.3 ไฟล์ `.env` ของแอป (secret อยู่บน VM เท่านั้น)
+
+```bash
+cp ~/src/stock-streaming/deploy/env.vm.example ~/docker/stock-streaming/.env
+chmod 600 ~/docker/stock-streaming/.env
+openssl rand -hex 32   # -> INGEST_TOKEN
+openssl rand -hex 24   # -> POSTGRES_PASSWORD
+nano ~/docker/stock-streaming/.env   # แทนค่า change-me ทั้งหมด (CORS_ORIGINS ใส่หลังขั้น 1.8 ได้)
+```
+
+⚠️ `POSTGRES_PASSWORD` มีผลแค่ตอนสร้าง volume ครั้งแรก ถ้าเปลี่ยนภายหลังต้องเปลี่ยนในฐานข้อมูลด้วย (ดูหัวข้อ 2)
+
+### 1.4 SSH key สำหรับ GitHub Actions
+
+บน VM:
+
+```bash
+ssh-keygen -t ed25519 -f ~/gh_deploy -N "" -C "github-actions-deploy"
+cat ~/gh_deploy.pub >> ~/.ssh/authorized_keys
+cat ~/gh_deploy          # copy ทั้งหมด (รวมบรรทัด BEGIN/END) ไปใส่ secret VM_SSH_KEY
+rm ~/gh_deploy           # ลบ private key ออกจาก VM หลัง copy แล้ว
+```
+
+บนเครื่องของคุณ (ไม่ใช่บน VM) สำหรับ pin host key:
+
+```bash
+ssh-keyscan -H 140.245.108.27   # copy ผลลัพธ์ไปใส่ secret VM_KNOWN_HOSTS
+```
+
+### 1.5 GitHub repository settings
+
+1. **Settings → Environments → New environment** ตั้งชื่อ `production`
+2. ใน environment `production` เพิ่ม **Environment secrets**:
+
+| Secret | ค่า |
+|---|---|
+| `VM_HOST` | `140.245.108.27` |
+| `VM_USER` | `ubuntu` |
+| `VM_SSH_KEY` | private key จากขั้น 1.4 |
+| `VM_KNOWN_HOSTS` | ผลลัพธ์ของ `ssh-keyscan` (ไม่ใส่ก็ได้ ระบบจะ scan เองตอน deploy) |
+
+### 1.6 Deploy ครั้งแรก
+
+1. Merge PR เข้า `master` → workflow **CI** รัน → ถ้าผ่าน **Deploy** จะรันต่ออัตโนมัติ
+2. **ครั้งแรก job `deploy` จะ fail ตอน pull image** เพราะ GHCR สร้าง package เป็น private เป็นค่าเริ่มต้น (decision D2: เปลี่ยนเป็น public):
+   - GitHub → รูปโปรไฟล์ → **Your profile → Packages** → `stock-streaming-api` → **Package settings** → **Change visibility → Public**
+   - ทำแบบเดียวกันกับ `stock-streaming-ingestion`
+   - กลับไปที่ run ของ Deploy ที่ fail แล้วกด **Re-run failed jobs**
+
+✅ job `Health check` ผ่าน และ `curl https://api.fuiji-stock.duckdns.org/health` ได้ `{"status":"ok","version":"sha-…"}`
+
+### 1.7 ดึงข้อมูลย้อนหลัง (ทำครั้งเดียว)
+
+```bash
+cd ~/docker/stock-streaming
+dc run --rm api python -m src.backfill --days 5
+```
+
+✅ `curl "https://api.fuiji-stock.duckdns.org/candles?symbol=AAPL&limit=3"` ได้แท่งเทียนกลับมา
+
+### 1.8 Frontend บน Vercel
+
+1. https://vercel.com/new → Import repo `FUIJI/stock-streaming`
+2. **Root Directory:** `frontend` (Vercel ตรวจเจอว่าเป็น Next.js เอง)
+3. **Environment Variables:** `NEXT_PUBLIC_API_URL` = `https://api.fuiji-stock.duckdns.org`
+   (ไม่ต้องตั้ง WS URL เพราะ `useTradeStream.ts` แปลง `https` เป็น `wss` ให้อยู่แล้ว)
+4. Deploy แล้วจด URL ไว้ เช่น `https://stock-streaming-xxx.vercel.app`
+5. บน VM เพิ่ม URL นั้นใน `CORS_ORIGINS` ของ `.env` แล้วรัน `dc up -d api`
+
+✅ เปิด URL ของ Vercel แล้วกราฟโหลดได้ DevTools ไม่มี error เรื่อง CORS หรือ mixed content
+และระหว่างตลาดเปิด (20:30–03:00 น. หรือ 21:30–04:00 น. ตามเวลาไทย ขึ้นกับ daylight saving ของสหรัฐฯ) แท่งล่าสุดจะขยับเอง
+
+> `NEXT_PUBLIC_*` ถูกฝังตอน build ถ้าเปลี่ยนค่าต้อง Redeploy บน Vercel
+
+---
+
+## 2. งานประจำ
+
+| งาน | วิธี |
+|---|---|
+| Deploy | merge เข้า `master` (อัตโนมัติ) หรือ Actions → **Deploy** → Run workflow โดยเว้น `image_tag` ว่าง |
+| Rollback | Actions → **Deploy** → Run workflow → `image_tag` = tag เก่า เช่น `sha-1a2b3c4` (ดูได้จากหน้า Packages หรือ log ของ run ก่อนหน้า) |
+| ดู log | `dc logs -f --tail=100 api ingestion` |
+| ดูสถานะ / RAM | `dc ps` · `docker stats --no-stream` · `free -h` |
+| Restart | `dc restart api ingestion` |
+| Backfill เพิ่ม | `dc run --rm api python -m src.backfill --days 10` |
+| เพิ่มหรือลดหุ้น | แก้ `SYMBOLS` ใน `.env` แล้วรัน `dc up -d ingestion` (Alpaca free รับได้ ~30 ตัว) |
+| เข้า psql | `dc exec postgres psql -U stock -d stocks` |
+| หมุน `INGEST_TOKEN` | แก้ `.env` แล้วรัน `dc up -d api ingestion` (ทั้งสองตัวต้องใช้ค่าเดียวกัน) |
+| หมุน Alpaca key | Generate key ใหม่บน Alpaca → แก้ `.env` → `dc up -d ingestion` → ลบ key เก่าบน Alpaca |
+| เปลี่ยนรหัส Postgres | `dc exec postgres psql -U stock -d stocks -c "ALTER USER stock PASSWORD '<ใหม่>'"` → แก้ `.env` → `dc up -d` |
+| Backup ฐานข้อมูล | `dc exec -T postgres pg_dump -U stock stocks \| gzip > ~/stocks-$(date +%F).sql.gz` |
+
+---
+
+## 3. เหตุฉุกเฉิน
+
+### Deploy fail
+- **`Pull images and restart` fail ด้วย `unauthorized`** → package บน GHCR ยังเป็น private ให้ทำตามขั้น 1.6
+- **`Pull images and restart` fail ด้วย `Missing .env`** → ยังไม่ได้ทำขั้น 1.3
+- **`Health check` fail** → ดู `dc logs --tail=100 api` บน VM ถ้าแก้ไม่ทัน ให้ rollback ไป tag ก่อนหน้า
+- **`Configure SSH` / `Copy compose files` fail** → ตรวจ secret ทั้ง 3 ตัว และตรวจว่า Security List ของ Oracle ยังเปิดพอร์ต 22 ให้เข้าจากภายนอก
+
+### ingestion ขึ้น error 406 (`connection limit exceeded`)
+Alpaca free เปิด WebSocket ได้ทีละ 1 connection ตรวจว่าไม่มี ingestion ตัวอื่นที่ใช้ key เดียวกัน
+(เช่น `make lite-up` บนเครื่องตัวเองที่ตั้ง `TRADE_SOURCE=alpaca` ไว้) แล้วรัน `dc restart ingestion`
+
+### IP ของ VM เปลี่ยน
+เกิดเมื่อ stop แล้ว start instance ที่ใช้ ephemeral IP
+1. DuckDNS → ใส่ IP ใหม่ → **update ip**
+2. GitHub → secret `VM_HOST` และ `VM_KNOWN_HOSTS` (รัน `ssh-keyscan` ใหม่)
+3. ป้องกันในอนาคต: Oracle Console → instance → VNIC → เปลี่ยนเป็น **Reserved Public IP**
+
+### Oracle เรียกคืน instance หรือต้องย้ายไป VM ใหม่
+1. สร้าง instance ใหม่ ติดตั้ง Docker และเปิดพอร์ต 80/443 (Security List + iptables)
+2. ทำหัวข้อ 1.1 ถึง 1.5 ใหม่ (และย้ายไฟล์เว็บเรซูเม่ไปไว้ใน `~/docker/lab/resume`)
+3. อัปเดต DuckDNS และ secret `VM_HOST`/`VM_KNOWN_HOSTS`
+4. Actions → **Deploy** → Run workflow โดยใส่ `image_tag` ล่าสุด แล้วทำขั้น 1.7 (backfill)
+5. ถ้ามี backup ฐานข้อมูล: `gunzip -c stocks-YYYY-MM-DD.sql.gz | dc exec -T postgres psql -U stock -d stocks`
+
+---
+
+## 4. ข้อจำกัดที่รู้อยู่
+
+- **Deploy key มีสิทธิ์เท่า user `ubuntu`:** user นี้อยู่ในกลุ่ม `docker` (เทียบเท่า root) และใช้ `sudo` ได้ ใครได้ `VM_SSH_KEY` ไปจะควบคุม VM ได้ทั้งหมด
+  ถ้าต้องการจำกัดสิทธิ์ ให้สร้าง user แยกสำหรับ deploy และจำกัดคำสั่งใน `authorized_keys` (`command=`) ซึ่งยังไม่ได้ทำใน Phase 2
+- **API สาธารณะยังไม่มี auth และ rate limit:** ใครก็เปิด `/ws/{symbol}` หรือเรียก `/candles` ได้ไม่จำกัด (มีแผนไว้ใน Phase 3)
+- **ข้อมูลระหว่าง API ล่มเกิน ~2 นาทีจะหาย:** เติมคืนได้ด้วย backfill
+- **ราคามาจาก IEX feed:** volume ต่ำกว่าข้อมูลรวมทั้งตลาด (consolidated tape) มาก แต่ราคาใกล้เคียงกัน

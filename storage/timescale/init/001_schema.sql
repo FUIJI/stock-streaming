@@ -1,6 +1,5 @@
--- Our bind mount replaces the image's /docker-entrypoint-initdb.d (which is what
--- normally creates the extension), so create it here explicitly.
-CREATE EXTENSION IF NOT EXISTS timescaledb;
+-- Plain Postgres on purpose: the lite stack (and Supabase/Neon) mounts only this
+-- file. Everything TimescaleDB-specific lives in 002_hypertables.sql.
 
 -- Serving table: 1-minute OHLCV candles, upserted by the processing layer.
 CREATE TABLE IF NOT EXISTS ohlcv_1m (
