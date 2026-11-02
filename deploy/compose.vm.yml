@@ -24,6 +24,10 @@ services:
 
   api:
     ports: !reset []
+    environment:
+      # Only Caddy can reach the API here, so trust its X-Forwarded-For: the rate
+      # limits then see real client IPs instead of Caddy's container address.
+      FORWARDED_ALLOW_IPS: "*"
     networks:
       default:
       web:

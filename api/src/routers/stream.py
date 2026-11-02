@@ -8,6 +8,7 @@ from collections import defaultdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..feed import FeedStats
+from ..limits import ConnectionLimiter
 
 log = logging.getLogger("api.stream")
 
@@ -80,17 +81,41 @@ async def consume_trades(broadcaster: TradeBroadcaster, stats: FeedStats) -> Non
 
 @router.websocket("/ws/{symbol}")
 async def ws_trades(websocket: WebSocket, symbol: str) -> None:
-    await websocket.accept()
-    broadcaster: TradeBroadcaster = websocket.app.state.broadcaster
+    state = websocket.app.state
     symbol = symbol.upper()
+    ip = websocket.client.host if websocket.client else "unknown"
+    limiter: ConnectionLimiter | None = getattr(state, "ws_limiter", None)
+    if symbol not in state.symbols:
+        await websocket.close(code=1008)  # rejected during the handshake (HTTP 403)
+        return
+    if limiter is not None and not limiter.acquire(ip):
+        await websocket.close(code=1013)
+        return
+
+    await websocket.accept()
+    broadcaster: TradeBroadcaster = state.broadcaster
     queue = broadcaster.subscribe(symbol)
-    try:
+
+    async def forward() -> None:
         while True:
             await websocket.send_text(await queue.get())
-    except WebSocketDisconnect:
-        pass
+
+    async def until_client_leaves() -> None:
+        # Without reading, a client that disconnects while no trades flow (market
+        # closed) would only be noticed on the next send, holding its slot meanwhile.
+        while (await websocket.receive())["type"] != "websocket.disconnect":
+            pass
+
+    tasks = [asyncio.create_task(forward()), asyncio.create_task(until_client_leaves())]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         broadcaster.unsubscribe(symbol, queue)
+        if limiter is not None:
+            limiter.release(ip)
 
 
 @router.websocket("/internal/ingest")

@@ -12,6 +12,7 @@ from .db import create_pool
 from .backfill import parse_symbols
 from .feed import FeedStats
 from .jobs import run_schedule
+from .limits import ConnectionLimiter, RateLimiter, RateLimitMiddleware
 from .market import MarketCalendar
 from .migrate import migrate
 from .quotes import SnapshotCache
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI):
     await migrate(app.state.pool)
     app.state.broadcaster = TradeBroadcaster()
     app.state.feed = FeedStats()
+    app.state.rate_limiter = RateLimiter(int(os.environ.get("RATE_LIMIT_PER_MIN", "120")))
+    app.state.ws_limiter = ConnectionLimiter(int(os.environ.get("WS_MAX_CONNECTIONS", "200")),
+                                             int(os.environ.get("WS_MAX_PER_IP", "10")))
     app.state.alpaca = AlpacaClient.from_env()
     app.state.market = MarketCalendar(app.state.alpaca) if app.state.alpaca else None
     app.state.snapshots = (SnapshotCache(app.state.alpaca, os.environ.get("ALPACA_FEED", "iex"))
@@ -72,6 +76,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Stock Streaming API", lifespan=lifespan)
 
+# Added first = runs inside CORS, so 429 responses still carry CORS headers.
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(","),
