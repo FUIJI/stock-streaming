@@ -21,6 +21,18 @@ jobs:
       fail-fast: false
       matrix:
         service: [ingestion, api]
+    services:
+      # Throwaway database for the api integration tests (skipped when TEST_PG_DSN is unset).
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      TEST_PG_DSN: postgresql://postgres:test@localhost:5432/postgres
     defaults:
       run:
         working-directory: ${{ matrix.service }}

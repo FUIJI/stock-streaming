@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .aggregator import CandleAggregator, flush_candles, load_recent_candles, run_flusher
 from .db import create_pool
+from .migrate import migrate
 from .routers import candles, stream
 from .routers.stream import TradeBroadcaster, consume_trades
 
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
         raise RuntimeError("TRADE_FEED=ingest requires INGEST_TOKEN")
 
     app.state.pool = await create_pool()
+    await migrate(app.state.pool)
     app.state.broadcaster = TradeBroadcaster()
     app.state.aggregator = None
     if feed == "kafka":
