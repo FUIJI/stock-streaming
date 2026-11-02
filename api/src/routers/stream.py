@@ -5,6 +5,7 @@ import os
 import secrets
 from collections import defaultdict
 
+import anyio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..feed import FeedStats
@@ -92,27 +93,30 @@ async def ws_trades(websocket: WebSocket, symbol: str) -> None:
         await websocket.close(code=1013)
         return
 
-    await websocket.accept()
     broadcaster: TradeBroadcaster = state.broadcaster
-    queue = broadcaster.subscribe(symbol)
-
-    async def forward() -> None:
-        while True:
-            await websocket.send_text(await queue.get())
-
-    async def until_client_leaves() -> None:
-        # Without reading, a client that disconnects while no trades flow (market
-        # closed) would only be noticed on the next send, holding its slot meanwhile.
-        while (await websocket.receive())["type"] != "websocket.disconnect":
-            pass
-
-    tasks = [asyncio.create_task(forward()), asyncio.create_task(until_client_leaves())]
+    queue = broadcaster.subscribe(symbol)  # before accept, so no trade slips in between
     try:
-        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        await websocket.accept()
+        async with anyio.create_task_group() as tg:
+
+            async def forward() -> None:
+                try:
+                    while True:
+                        await websocket.send_text(await queue.get())
+                except Exception:  # client already gone mid-send
+                    tg.cancel_scope.cancel()
+
+            async def until_client_leaves() -> None:
+                # Without reading, a client that disconnects while no trades flow
+                # (market closed) would only be noticed on the next send, keeping
+                # its queue and connection slot meanwhile.
+                while (await websocket.receive())["type"] != "websocket.disconnect":
+                    pass
+                tg.cancel_scope.cancel()
+
+            tg.start_soon(forward)
+            tg.start_soon(until_client_leaves)
     finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
         broadcaster.unsubscribe(symbol, queue)
         if limiter is not None:
             limiter.release(ip)
