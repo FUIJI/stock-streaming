@@ -78,11 +78,14 @@ cat ~/gh_deploy          # copy ทั้งหมด (รวมบรรทั�
 rm ~/gh_deploy           # ลบ private key ออกจาก VM หลัง copy แล้ว
 ```
 
-บนเครื่องของคุณ (ไม่ใช่บน VM) สำหรับ pin host key:
+Host key ของ VM สำหรับ secret `VM_KNOWN_HOSTS` (อ่านจาก VM เองโดยตรง จึงเชื่อถือได้ที่สุด):
 
 ```bash
-ssh-keyscan -H 140.245.108.27   # copy ผลลัพธ์ไปใส่ secret VM_KNOWN_HOSTS
+for f in /etc/ssh/ssh_host_*_key.pub; do echo "140.245.108.27,fuiji-stock.duckdns.org $(cut -d' ' -f1,2 "$f")"; done
 ```
+
+copy ผลลัพธ์ทุกบรรทัดไปใส่ `VM_KNOWN_HOSTS` แต่ละบรรทัดใช้ได้ทั้งกับ IP และโดเมน
+ค่า `VM_HOST` ต้องเป็นหนึ่งในสองชื่อนี้ (ถ้าไม่ตรง deploy จะ fail ด้วย `Host key verification failed`)
 
 ### 1.5 GitHub repository settings
 
@@ -94,7 +97,7 @@ ssh-keyscan -H 140.245.108.27   # copy ผลลัพธ์ไปใส่ secr
 | `VM_HOST` | `140.245.108.27` |
 | `VM_USER` | `ubuntu` |
 | `VM_SSH_KEY` | private key จากขั้น 1.4 |
-| `VM_KNOWN_HOSTS` | ผลลัพธ์ของ `ssh-keyscan` (ไม่ใส่ก็ได้ ระบบจะ scan เองตอน deploy) |
+| `VM_KNOWN_HOSTS` | ผลลัพธ์จากคำสั่งในขั้น 1.4 (ไม่ใส่ก็ได้ ระบบจะ scan เองตอน deploy แต่ปลอดภัยน้อยกว่า) |
 
 ### 1.6 Deploy ครั้งแรก
 
@@ -156,7 +159,9 @@ dc run --rm api python -m src.backfill --days 5
 - **`Pull images and restart` fail ด้วย `unauthorized`** → package บน GHCR ยังเป็น private ให้ทำตามขั้น 1.6
 - **`Pull images and restart` fail ด้วย `Missing .env`** → ยังไม่ได้ทำขั้น 1.3
 - **`Health check` fail** → ดู `dc logs --tail=100 api` บน VM ถ้าแก้ไม่ทัน ให้ rollback ไป tag ก่อนหน้า
-- **`Configure SSH` / `Copy compose files` fail** → ตรวจ secret ทั้ง 3 ตัว และตรวจว่า Security List ของ Oracle ยังเปิดพอร์ต 22 ให้เข้าจากภายนอก
+- **`Configure SSH` fail ด้วย `No host key for VM_HOST`** หรือ **`Host key verification failed`** → สร้าง `VM_KNOWN_HOSTS` ใหม่ตามขั้น 1.4 และเช็กว่า `VM_HOST` ไม่มีช่องว่างหรือขึ้นบรรทัดใหม่ต่อท้าย
+- **`Configure SSH` fail ด้วย `Permission denied (publickey)`** → `VM_SSH_KEY` ไม่ตรงกับ public key ใน `~/.ssh/authorized_keys` บน VM
+- **`Configure SSH` fail ด้วย timeout** → ตรวจว่า Security List ของ Oracle ยังเปิดพอร์ต 22 ให้เข้าจากภายนอก
 
 ### ingestion ขึ้น error 406 (`connection limit exceeded`)
 Alpaca free เปิด WebSocket ได้ทีละ 1 connection ตรวจว่าไม่มี ingestion ตัวอื่นที่ใช้ key เดียวกัน
@@ -165,7 +170,7 @@ Alpaca free เปิด WebSocket ได้ทีละ 1 connection ตรว�
 ### IP ของ VM เปลี่ยน
 เกิดเมื่อ stop แล้ว start instance ที่ใช้ ephemeral IP
 1. DuckDNS → ใส่ IP ใหม่ → **update ip**
-2. GitHub → secret `VM_HOST` และ `VM_KNOWN_HOSTS` (รัน `ssh-keyscan` ใหม่)
+2. GitHub → secret `VM_HOST` และ `VM_KNOWN_HOSTS` (สร้างใหม่ตามขั้น 1.4 ด้วย IP ใหม่)
 3. ป้องกันในอนาคต: Oracle Console → instance → VNIC → เปลี่ยนเป็น **Reserved Public IP**
 
 ### Oracle เรียกคืน instance หรือต้องย้ายไป VM ใหม่
