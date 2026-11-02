@@ -1,6 +1,6 @@
 # Phase 2 — Deploy lite stack ขึ้น production
 
-> สถานะ: **Draft — รอ review** · Base branch: `feat/lite-mode` (ยังไม่ merge)
+> สถานะ: **Approved — กำลังทำ** · Base branch: `feat/lite-mode` (ยังไม่ merge)
 
 ## เป้าหมาย
 
@@ -43,14 +43,16 @@ Browser ──HTTPS──► Vercel (Next.js) ──fetch / wss──► api.fui
 GitHub push master ─► Actions: test → build image → GHCR ─► SSH เข้า VM → compose pull && up -d
 ```
 
-## Decisions ที่ต้องเลือกก่อนเริ่ม
+## Decisions (ตกลงแล้ว)
 
-| # | คำถาม | ตัวเลือก | แนะนำ |
+| # | เรื่อง | ตัดสินใจ | เหตุผล |
 |---|---|---|---|
-| D1 | ฐานข้อมูลอยู่ที่ไหน | **(a) Postgres บน VM** ใช้ RAM ~40–60 MB ไม่มี dependency ภายนอก · **(b) Supabase free** VM เบาลงและมี backup แต่ project ที่ไม่มีการใช้งานจะถูก pause และต้องเปิด SSL/pooler | **(a)** ตอนนี้ แล้วค่อยย้ายตอน Phase 3 ที่ต้องใช้ Supabase Auth อยู่แล้ว (schema เป็น Postgres ธรรมดา ย้ายง่าย) |
-| D2 | image บน GHCR เป็น public หรือ private | **public**: VM pull ได้เลย · **private**: VM ต้อง `docker login` ด้วย PAT `read:packages` | **public** — โค้ดเป็น public repo อยู่แล้ว และใน image ไม่มี secret |
-| D3 | secret ของแอป (Alpaca key, INGEST_TOKEN, PG password) เก็บที่ไหน | **ไฟล์ `.env` บน VM** สร้างมือครั้งเดียว · **GitHub Secrets** แล้วให้ workflow เขียน `.env` ทุกครั้ง | **`.env` บน VM** — secret ไม่ต้องผ่าน CI, GitHub Secrets เก็บแค่ข้อมูล SSH |
-| D4 | frontend อยู่ที่ไหน | **Vercel** (`*.vercel.app`) · **VM** (Next.js standalone ใช้ RAM ~100 MB) | **Vercel** — ไม่กิน RAM ของ VM และได้ CDN ฟรี |
+| D1 | ฐานข้อมูล | **Postgres container บน VM** (~50 MB) | Phase 3 จะย้ายไป Supabase ซึ่งเป็น Postgres เหมือนกัน · Redis และ SQLite ตกไปเพราะ RAM จำกัดและเส้นทางย้ายไป Supabase ยาวกว่า |
+| D2 | image บน GHCR | **public** | VM pull ได้โดยไม่ต้อง login, ใน image ไม่มี secret |
+| D3 | secret ของแอป | **`.env` บน VM** (สร้างมือครั้งเดียว) | secret ไม่ต้องผ่าน CI · GitHub Secrets เก็บแค่ข้อมูล SSH |
+| D4 | frontend | **Vercel** | ไม่กิน RAM ของ VM และได้ CDN ฟรี |
+| D5 | log rotation | ตั้งต่อ service ใน compose แทน `daemon.json` | แก้ `daemon.json` ต้อง restart dockerd ซึ่งจะทำให้เว็บเรซูเม่ดับชั่วคราว |
+| D6 | TDD | ไม่ใช้ใน Phase นี้ | งานส่วนใหญ่เป็น infra · ตรวจด้วย `shellcheck`, `caddy validate`, `docker compose config` และรันจริงบน VM |
 
 ---
 
@@ -67,13 +69,12 @@ GitHub push master ─► Actions: test → build image → GHCR ─► SSH เ�
 - สร้าง swapfile 2 GB และตั้งให้ mount อัตโนมัติหลัง reboot (`/etc/fstab`) ตั้ง `vm.swappiness=10`
 - สร้าง Docker network `web` ถ้ายังไม่มี
 - สร้างโฟลเดอร์ `~/docker/stock-streaming` ถ้ายังไม่มี
-- จำกัดขนาด log ของ Docker (json-file `max-size`/`max-file`) เพื่อไม่ให้ disk เต็ม
 
 **Acceptance criteria**
 - [ ] รันซ้ำกี่ครั้งก็ได้ผลเหมือนเดิม (idempotent): ไม่สร้าง swap ซ้ำ ไม่เพิ่มบรรทัดซ้ำใน `/etc/fstab`
 - [ ] หลังรันเสร็จ `free -h` แสดง Swap 2.0Gi และยังอยู่หลัง reboot
 - [ ] `docker network ls` มี `web`
-- [ ] ตลอดการรัน `caddy-proxy` และ `resume-site` ไม่ถูก restart (หรือถ้าต้อง restart dockerd ให้บอกล่วงหน้าใน output)
+- [ ] ตลอดการรัน `caddy-proxy` และ `resume-site` ไม่ถูก restart
 - [ ] `shellcheck deploy/bootstrap.sh` ผ่าน และไฟล์เป็น LF
 
 ### T2 — Caddy: HTTPS + route ไป API
@@ -104,6 +105,7 @@ API จึงต้องมี HTTPS ส่วน `/internal/ingest` ต้อ�
 - เพิ่ม `image: ghcr.io/fuiji/stock-streaming-{api,ingestion}:${IMAGE_TAG:-latest}` ใน `docker-compose.prod.yml` (ยัง build ในเครื่องได้เหมือนเดิม)
 - `deploy/compose.vm.yml` (override): ต่อ `api` เข้า network `web`, ไม่ publish พอร์ตของ API ออก host, เปิด Postgres ตาม D1 พร้อม `mem_limit`
 - ตั้ง `shared_buffers` และ `max_connections` ของ Postgres ให้เหมาะกับ RAM น้อย
+- จำกัดขนาด log ของทุก service (json-file `max-size`/`max-file`) ตาม D5
 - `.env.example` ระบุตัวแปรที่ต้องตั้งบน VM (`CORS_ORIGINS`, `TRADE_SOURCE=alpaca`, `INGEST_TOKEN` แบบสุ่ม ฯลฯ)
 
 **Acceptance criteria**
