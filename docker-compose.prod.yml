@@ -57,6 +57,7 @@ services:
       CANDLE_ROLLUP: sql
       INGEST_TOKEN: ${INGEST_TOKEN:?set INGEST_TOKEN in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
       # Market calendar, quotes, nightly reconcile and the one-shot backfill/jobs
       ALPACA_API_KEY: ${ALPACA_API_KEY:-}
       ALPACA_API_SECRET: ${ALPACA_API_SECRET:-}
