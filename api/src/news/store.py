@@ -7,6 +7,8 @@ from datetime import datetime
 
 import asyncpg
 
+from .analysis import NewsItem
+
 _TAGS = re.compile(r"<[^>]+>")
 
 
@@ -78,3 +80,15 @@ async def save_articles(pool: asyncpg.Pool, articles: list[Article], backfilled:
 
 async def latest_created_at(pool: asyncpg.Pool) -> datetime | None:
     return await pool.fetchval("SELECT max(created_at) FROM news")
+
+
+def to_item(row, tracked: set[str]) -> NewsItem:
+    """A `news` row as the LLM input; `tracked` = symbols the dashboard follows."""
+    tags = list(row["symbols"])
+    return NewsItem(id=row["id"], headline=row["headline"], summary=row["summary"],
+                    tags=tags, tracked=[s for s in tags if s in tracked])
+
+
+async def company_names(pool: asyncpg.Pool) -> dict[str, str]:
+    rows = await pool.fetch("SELECT symbol, name FROM symbols WHERE name IS NOT NULL")
+    return {r["symbol"]: r["name"] for r in rows}

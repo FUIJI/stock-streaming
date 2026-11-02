@@ -66,6 +66,11 @@ services:
       # News for tracked symbols (docs/specs/phase-3c-news.md); 0 disables polling
       NEWS_POLL_SEC: ${NEWS_POLL_SEC:-60}
       NEWS_BACKFILL_DAYS: ${NEWS_BACKFILL_DAYS:-3}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.8-flash}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-}
+      LLM_THINKING_LEVEL: ${LLM_THINKING_LEVEL:-low}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       SYMBOLS: ${SYMBOLS:-AAPL,MSFT,NVDA,TSLA}
     ports:
       - "${API_BIND:-127.0.0.1}:8000:8000"
