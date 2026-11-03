@@ -25,6 +25,8 @@ MAX_ATTEMPTS = 3
 BACKOFF = [timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=30)]
 # Bad key / bad request: every article would fail the same way. Wait, don't burn attempts.
 CONFIG_ERROR_PAUSE = timedelta(minutes=10)
+# 429: over Google's per-minute limits (e.g. 16K tokens/min on Gemma). Same idea, shorter.
+RATE_LIMIT_PAUSE = timedelta(minutes=1)
 
 
 @dataclass
@@ -115,6 +117,9 @@ async def process_once(pool: asyncpg.Pool, provider: ManagedProvider, tracked: s
     errors = list(result.failed.values())
     if errors and all(isinstance(e, QuotaExhausted) for e in errors) and not result.done:
         return Outcome(processed=0, pause_until=errors[0].resets_at)  # no attempt spent
+    if errors and all(getattr(e, "rate_limited", False) for e in errors) and not result.done:
+        log.warning("LLM rate limited (%s); pausing %s", errors[0], RATE_LIMIT_PAUSE)
+        return Outcome(processed=0, pause_until=now + RATE_LIMIT_PAUSE)
     if errors and all(not e.retryable for e in errors) and not result.done:
         log.error("LLM rejects requests (%s); pausing %s", errors[0], CONFIG_ERROR_PAUSE)
         return Outcome(processed=0, pause_until=now + CONFIG_ERROR_PAUSE)

@@ -3,6 +3,9 @@
     dc run --rm -T api python -m src.news.eval --runs 2 [--batch 10] < api/tests/news_eval/cases.json
     dc run --rm -T -e LLM_TEMPERATURE=0 api python -m src.news.eval ...   # try a setting
 
+Only the primary model is measured (the fallback's 20 calls a day are not spent here)
+and calls are paced at --rpm 1, since the running API shares the key's per-minute limit.
+
 Costs ~2 calls per run for 30 cases (batches of LLM_TRIAGE_BATCH). Writes nothing.
 Exit code 1 when below the bar in evaluation.PASS.
 """
@@ -68,10 +71,16 @@ def print_report(report: Report, run: int) -> None:
         print("  ✗", line)
 
 
-async def run(cases: list[dict], runs: int, batch: int) -> bool:
+async def run(cases: list[dict], runs: int, batch: int, rpm: int,
+              with_fallback: bool) -> bool:
     provider = managed_provider_from_env()
     if provider is None:
         raise SystemExit("No LLM configured: set GEMINI_API_KEY (and LLM_MODEL if needed)")
+    if not with_fallback:
+        for extra in provider.providers[1:]:
+            await extra.aclose()
+        provider.providers = provider.providers[:1]
+    provider.quota.per_minute = rpm
     items = [to_item(c) for c in cases]
     names = await names_from_db()
     results, reports = [], []
@@ -82,8 +91,11 @@ async def run(cases: list[dict], runs: int, batch: int) -> bool:
             results.append(result.done)
             reports.append(score(cases, result.done))
             print_report(reports[-1], i + 1)
+            errors: dict[str, list[int]] = {}
             for news_id, error in result.failed.items():
-                print(f"  ! {news_id}: {error}")
+                errors.setdefault(str(error)[:200], []).append(news_id)
+            for message, ids in errors.items():
+                print(f"  ! {len(ids)} articles: {message}")
             print(f"calls {result.calls} · splits {result.splits} · tokens in/out "
                   f"{result.prompt_tokens}/{result.output_tokens} · "
                   f"{time.monotonic() - started:.0f}s")
@@ -106,13 +118,17 @@ def main() -> None:
     parser.add_argument("--batch", type=int,
                         default=int(os.environ.get("LLM_TRIAGE_BATCH", "25")),
                         help="articles per call (default: LLM_TRIAGE_BATCH)")
+    parser.add_argument("--rpm", type=int, default=1, help="calls per minute (default 1)")
+    parser.add_argument("--with-fallback", action="store_true",
+                        help="also use LLM_FALLBACK_MODEL (spends its small daily quota)")
     args = parser.parse_args()
     cases = [c for c in json.load(sys.stdin)["cases"] if labelled(c)]
     if not cases:
         raise SystemExit("No labelled cases on stdin (see tests/news_eval/README.md)")
     print(f"{len(cases)} labelled cases · {args.batch} per call · "
           f"temperature {os.environ.get('LLM_TEMPERATURE', 'default')}")
-    sys.exit(0 if asyncio.run(run(cases, args.runs, args.batch)) else 1)
+    sys.exit(0 if asyncio.run(run(cases, args.runs, args.batch, args.rpm,
+                                  args.with_fallback)) else 1)
 
 
 if __name__ == "__main__":

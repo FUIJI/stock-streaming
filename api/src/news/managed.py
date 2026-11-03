@@ -58,8 +58,10 @@ class Quota:
 
 
 class ManagedProvider:
-    """Tries each model in order; moves on only when one is *unavailable* (rate limit,
-    overload, timeout). Bad output is returned to the analyzer, which retries smaller."""
+    """Tries each model in order; moves on only when one is *unavailable* (overload,
+    timeout). A 429 is not passed on: it means our key is over a limit, which waiting
+    fixes, and the fallback's tiny daily quota (Flash: 20) would just be burned with it.
+    Bad output is returned to the analyzer, which retries smaller."""
 
     name = "managed"
 
@@ -80,7 +82,7 @@ class ManagedProvider:
                 text = await provider.generate_json(system, user, schema, max_tokens)
             except LLMError as exc:
                 self.last_error = f"{provider.model}: {exc}"[:300]
-                if exc.bad_output or not exc.retryable:
+                if exc.bad_output or not exc.retryable or exc.rate_limited:
                     raise
                 error = exc
                 continue

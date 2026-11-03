@@ -96,3 +96,12 @@ async def test_per_minute_limit_waits_instead_of_failing():
     await quota.acquire()
     await quota.acquire()  # third call within the minute: waits for the first to age out
     assert waits == [50] and quota.calls_today == 3
+
+
+async def test_rate_limits_do_not_burn_the_fallbacks_daily_quota():
+    limited = LLMError("Gemini 429: quota", retryable=True, rate_limited=True)
+    primary, fallback = Scripted("gemma", limited), Scripted("gemini-flash", ANSWER)
+    managed = ManagedProvider([primary, fallback], roomy_quota())
+    with pytest.raises(LLMError) as raised:
+        await managed.generate_json("s", "u", {})
+    assert raised.value.rate_limited and fallback.calls == 0
