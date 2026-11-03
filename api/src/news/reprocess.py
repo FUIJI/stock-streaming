@@ -41,10 +41,15 @@ async def reset(pool: asyncpg.Pool, since: datetime, status: str,
 async def failing_checks(pool: asyncpg.Pool, since: datetime) -> list[int]:
     """Articles whose stored AI text would be rejected by the current checks."""
     rows = await pool.fetch(
-        """SELECT a.news_id, a.summary_th, a.why_it_matters FROM news_ai a
-           JOIN news n ON n.id = a.news_id WHERE n.created_at >= $1""", since)
-    return [r["news_id"] for r in rows
-            if degeneration(r["summary_th"]) or degeneration(r["why_it_matters"])]
+        """SELECT a.news_id, a.prompt_version, a.headline_th, a.summary_th, a.why_it_matters
+           FROM news_ai a JOIN news n ON n.id = a.news_id WHERE n.created_at >= $1""", since)
+    # Triage (t*) rows still carry Phase 3c summaries, which re-running triage won't replace:
+    # only their own field counts, or they would be re-queued forever.
+    def fields(r) -> tuple[str, ...]:
+        if r["prompt_version"].startswith("t"):
+            return ("headline_th",)
+        return ("summary_th", "why_it_matters")
+    return [r["news_id"] for r in rows if any(r[k] and degeneration(r[k]) for k in fields(r))]
 
 
 async def requeue(pool: asyncpg.Pool, ids: list[int]) -> int:

@@ -51,10 +51,13 @@ function NewsEntry({ item, symbol }: { item: NewsItem; symbol: string }) {
         {ai && <span className="news-category">{CATEGORY_LABELS[ai.category] ?? ai.category}</span>}
       </div>
 
-      {ai ? (
+      {ai?.summary_th || ai?.headline_th ? (
         <>
-          <p className="news-summary" lang="th">{ai.summary_th}</p>
-          <p className="news-why" lang="th">{ai.why_it_matters}</p>
+          {/* Older articles have a full summary (Phase 3c); newer ones a one-line headline. */}
+          <p className="news-summary" lang="th">{ai.summary_th ?? ai.headline_th}</p>
+          {ai.summary_th && ai.why_it_matters && (
+            <p className="news-why" lang="th">{ai.why_it_matters}</p>
+          )}
         </>
       ) : (
         item.summary && <p className="news-summary">{item.summary}</p>

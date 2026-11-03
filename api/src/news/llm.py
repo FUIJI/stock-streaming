@@ -44,6 +44,7 @@ class GeminiProvider:
                  thinking_level: str | None = None, base_url: str = GEMINI_URL,
                  transport: httpx.AsyncBaseTransport | None = None, timeout: float = 300):
         self.model = model
+        self.last_usage: dict = {}  # usageMetadata of the last answer (token counts)
         self._temperature = temperature
         # Only Gemini models take a thinking level; Gemma rejects it with a 400.
         self._thinking_level = thinking_level if model.startswith("gemini") else None
@@ -76,6 +77,7 @@ class GeminiProvider:
             raise LLMError(f"Gemini {resp.status_code}: {resp.text[:300]}",
                            retryable=resp.status_code == 429 or resp.status_code >= 500)
         try:
+            self.last_usage = resp.json().get("usageMetadata") or {}
             candidate = resp.json()["candidates"][0]
             reason = candidate.get("finishReason")
             if reason in FILTERED_FINISH_REASONS:

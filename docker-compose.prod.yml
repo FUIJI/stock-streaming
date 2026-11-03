@@ -73,9 +73,13 @@ services:
       # Measured on the VM: Gemma answers (~25s/article); Flash was often overloaded.
       LLM_MODEL: ${LLM_MODEL:-gemma-4-26b-a4b-it}
       LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gemini-3.8-flash}
-      LLM_BATCH_SIZE: ${LLM_BATCH_SIZE:-1}
+      # Triage (docs/specs/phase-3d-news-digest.md): up to 25 headlines per call; fresh
+      # articles wait up to 45s for company. Lower the batch if Gemma's answers break.
+      LLM_TRIAGE_BATCH: ${LLM_TRIAGE_BATCH:-25}
+      LLM_TRIAGE_WAIT_SEC: ${LLM_TRIAGE_WAIT_SEC:-45}
       LLM_DAILY_CALL_LIMIT: ${LLM_DAILY_CALL_LIMIT:-200}
-      LLM_RPM_LIMIT: ${LLM_RPM_LIMIT:-10}
+      # A full batch is ~5.5K tokens and Gemma's free tier allows 16K tokens/minute.
+      LLM_RPM_LIMIT: ${LLM_RPM_LIMIT:-2}
       # Measured on the VM: Gemma loops at the default (~1.0) and at 0; 0.2 was clean.
       LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
       LLM_THINKING_LEVEL: ${LLM_THINKING_LEVEL:-low}

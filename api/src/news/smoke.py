@@ -1,6 +1,6 @@
 """Try the configured LLM on the newest stored articles; prints results, writes nothing.
 
-    python -m src.news.smoke --limit 3
+    python -m src.news.smoke --limit 25     # one triage batch, like the worker sends
 """
 
 import argparse
@@ -24,7 +24,9 @@ async def run(limit: int) -> None:
     tracked = set(parse_symbols(os.environ.get("SYMBOLS", "AAPL,MSFT,NVDA,TSLA")))
     pool = await create_pool()
     try:
-        rows = await pool.fetch("SELECT * FROM news ORDER BY created_at DESC LIMIT $1", limit)
+        rows = await pool.fetch(
+            "SELECT * FROM news WHERE ai_status <> 'skipped' ORDER BY created_at DESC LIMIT $1",
+            limit)
         items = [to_item(r, tracked) for r in rows]
         models = " -> ".join(p.model for p in provider.providers)
         print(f"models={models} articles={len(items)}")
@@ -47,14 +49,16 @@ async def run(limit: int) -> None:
                              ensure_ascii=False, indent=2))
         else:
             print("FAILED:", result.failed.get(item.id))
-    print(f"\nLLM calls: {result.calls} · {elapsed:.1f}s · quota used today: "
+    print(f"\n{len(result.done)}/{len(items)} triaged · LLM calls: {result.calls} · "
+          f"batch splits: {result.splits} · tokens in/out: {result.prompt_tokens}/"
+          f"{result.output_tokens} · {elapsed:.1f}s · quota used today: "
           f"{provider.quota.calls_today}")
 
 
 def main() -> None:
     logging.basicConfig(level=logging.WARNING)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--limit", type=int, default=3)
+    parser.add_argument("--limit", type=int, default=25)
     asyncio.run(run(parser.parse_args().limit))
 
 

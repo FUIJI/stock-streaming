@@ -9,7 +9,7 @@ function item(id: number, importance: number | null, hidden = false): NewsItem {
     symbols: ["AAPL"], created_at: "2026-11-03T03:25:37Z", updated_at: "2026-11-03T03:25:37Z",
     backfilled: false, ai_status: importance === null ? "pending" : "done", skip_reason: null,
     ai: importance === null ? null : {
-      summary_th: "สรุป", why_it_matters: "เพราะ", category: "product", importance,
+      headline_th: "หัวข่าว", summary_th: "สรุป", why_it_matters: "เพราะ", category: "product", importance,
       is_market_wide: false, model: "gemma", prompt_version: "v3", processed_at: "",
     },
     per_symbol: [{ symbol: "AAPL", relevance: hidden ? 0.2 : 0.9, sentiment: -0.6 }],

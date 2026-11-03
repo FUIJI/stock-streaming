@@ -17,7 +17,7 @@ def article(news_id, minutes_ago, symbols=("AAPL",)):
 
 
 def answer(news_id, importance=4, symbol="AAPL"):
-    return ('{"items": [{"id": %d, "summary_th": "สรุป %d", "why_it_matters": "เพราะ",'
+    return ('{"items": [{"id": %d, "headline_th": "หัวข่าว %d",'
             ' "category": "product", "importance": %d, "is_market_wide": false,'
             ' "per_symbol": [{"symbol": "%s", "relevance": 0.9, "sentiment": 0.3}]}]}'
             % (news_id, news_id, importance, symbol))
@@ -60,8 +60,8 @@ async def test_newest_article_first_and_results_are_stored(pg_pool):
     outcome = await run(pg_pool, managed(answer(2)))
     assert (outcome.processed, outcome.done) == (1, 1)
     ai = await pg_pool.fetchrow("SELECT * FROM news_ai WHERE news_id = 2")
-    assert (ai["summary_th"], ai["importance"], ai["model"], ai["prompt_version"]) == (
-        "สรุป 2", 4, "gemma", "v2")
+    assert (ai["headline_th"], ai["importance"], ai["model"], ai["prompt_version"]) == (
+        "หัวข่าว 2", 4, "gemma", "v2")
     syms = await pg_pool.fetch("SELECT symbol, relevance FROM news_symbols WHERE news_id = 2")
     assert [(r["symbol"], r["relevance"]) for r in syms] == [("AAPL", 0.9)]  # SPY not tracked
     assert (await status(pg_pool, 2))["ai_status"] == "done"
@@ -143,3 +143,35 @@ async def test_recheck_requeues_only_summaries_that_fail_todays_checks(pg_pool):
     assert await requeue(pg_pool, bad) == 1
     assert (await status(pg_pool, 1))["ai_status"] == "pending"
     assert (await status(pg_pool, 2))["ai_status"] == "done"
+
+
+def batch_answer(*ids):
+    items = ",".join(answer(i)[len('{"items": ['):-2] for i in ids)
+    return '{"items": [' + items + ']}'
+
+
+async def test_fresh_articles_wait_briefly_so_one_call_carries_a_batch(pg_pool):
+    await migrate(pg_pool)
+    await save_articles(pg_pool, [article(1, 5), article(2, 3)], False)
+    await pg_pool.execute("UPDATE news SET fetched_at = $1", NOW - timedelta(seconds=10))
+    provider = managed(batch_answer(2, 1))
+    wait = timedelta(seconds=45)
+
+    outcome = await process_once(pg_pool, provider, {"AAPL"}, {}, 25, "t1", now=NOW,
+                                 batch_wait=wait)
+    assert outcome.processed == 0  # 2 < 25 and the oldest was fetched only 10s ago
+    later = NOW + timedelta(seconds=40)
+    outcome = await process_once(pg_pool, provider, {"AAPL"}, {}, 25, "t1", now=later,
+                                 batch_wait=wait)
+    assert (outcome.processed, outcome.done) == (2, 2)  # one call for both
+
+
+async def test_triage_keeps_the_phase_3c_summary(pg_pool):
+    await migrate(pg_pool)
+    await save_articles(pg_pool, [article(1, 5)], False)
+    await run(pg_pool, managed(answer(1)))
+    await pg_pool.execute("UPDATE news_ai SET summary_th = 'สรุปเดิม' WHERE news_id = 1")
+    await reset(pg_pool, NOW - timedelta(days=1), "done", None)
+    await run(pg_pool, managed(answer(1, importance=2)))
+    ai = await pg_pool.fetchrow("SELECT * FROM news_ai WHERE news_id = 1")
+    assert (ai["summary_th"], ai["headline_th"], ai["importance"]) == ("สรุปเดิม", "หัวข่าว 1", 2)

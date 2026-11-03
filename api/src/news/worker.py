@@ -47,6 +47,8 @@ class Outcome:
     pause_until: datetime | None = None  # the whole worker should wait until then
 
 
+# Fresh articles wait up to LLM_TRIAGE_WAIT_SEC (by fetched_at) so that a call carries
+# a batch instead of one article each. Backfills and re-queued old articles go at once.
 QUEUE_SQL = """
     SELECT * FROM news
     WHERE ai_status = 'pending' AND ai_next_attempt_at <= $1
@@ -66,17 +68,18 @@ async def _store(conn: asyncpg.Connection, row, final: FinalAnalysis, prompt_ver
             return False
         a = final.analysis
         await conn.execute(
-            """INSERT INTO news_ai (news_id, summary_th, why_it_matters, category, importance,
-                                    importance_raw, is_market_wide, model, prompt_version)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """INSERT INTO news_ai (news_id, headline_th, category, importance, importance_raw,
+                                    is_market_wide, model, prompt_version)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                ON CONFLICT (news_id) DO UPDATE SET
-                   summary_th = EXCLUDED.summary_th, why_it_matters = EXCLUDED.why_it_matters,
+                   headline_th = EXCLUDED.headline_th,
                    category = EXCLUDED.category, importance = EXCLUDED.importance,
                    importance_raw = EXCLUDED.importance_raw,
                    is_market_wide = EXCLUDED.is_market_wide, model = EXCLUDED.model,
                    prompt_version = EXCLUDED.prompt_version, processed_at = now()""",
-            row["id"], a.summary_th, a.why_it_matters, a.category, final.importance,
-            a.importance, a.is_market_wide, final.model, prompt_version)
+            # summary_th / why_it_matters (Phase 3c) are left as they were
+            row["id"], a.headline_th, a.category, final.importance, a.importance,
+            a.is_market_wide, final.model, prompt_version)
         await conn.execute("DELETE FROM news_symbols WHERE news_id = $1", row["id"])
         await conn.executemany(
             "INSERT INTO news_symbols (news_id, symbol, relevance, sentiment) VALUES ($1, $2, $3, $4)",
@@ -98,11 +101,14 @@ async def _record_failure(pool: asyncpg.Pool, row, error: LLMError, now: datetim
 
 async def process_once(pool: asyncpg.Pool, provider: ManagedProvider, tracked: set[str],
                        names: dict[str, str], batch_size: int, prompt_version: str,
-                       now: datetime | None = None) -> Outcome:
+                       now: datetime | None = None,
+                       batch_wait: timedelta = timedelta(0)) -> Outcome:
     now = now or datetime.now(UTC)
     rows = await pool.fetch(QUEUE_SQL, now, batch_size)
     if not rows:
         return Outcome(processed=0)
+    if len(rows) < batch_size and min(r["fetched_at"] for r in rows) > now - batch_wait:
+        return Outcome(processed=0)  # let the batch fill up a little longer
 
     result = await analyze(provider, [to_item(r, tracked) for r in rows], names)
     errors = list(result.failed.values())
@@ -134,7 +140,8 @@ async def refresh_counts(pool: asyncpg.Pool, stats: LLMStats) -> None:
 async def run_worker(pool: asyncpg.Pool, provider: ManagedProvider, tracked: set[str],
                      stats: LLMStats) -> None:
     """Never raises: errors are logged and reported through `stats` (/health)."""
-    batch_size = int(os.environ.get("LLM_BATCH_SIZE", "1"))
+    batch_size = int(os.environ.get("LLM_TRIAGE_BATCH", "25"))
+    batch_wait = timedelta(seconds=float(os.environ.get("LLM_TRIAGE_WAIT_SEC", "45")))
     idle = float(os.environ.get("NEWS_WORKER_IDLE_SEC", "15"))
     stats.provider = "gemini"
     stats.models = " -> ".join(p.model for p in provider.providers)
@@ -149,7 +156,7 @@ async def run_worker(pool: asyncpg.Pool, provider: ManagedProvider, tracked: set
             if time.monotonic() - names_at > 3600:
                 names, names_at = await company_names(pool), time.monotonic()
             outcome = await process_once(pool, provider, tracked, names, batch_size,
-                                         PROMPT_VERSION)
+                                         PROMPT_VERSION, batch_wait=batch_wait)
             stats.last_error = provider.last_error
             if outcome.done:
                 stats.last_success_at = time.time()

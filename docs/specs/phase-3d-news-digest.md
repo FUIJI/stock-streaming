@@ -75,6 +75,7 @@ Alpaca News ─► news (pending)                                   [poller เ�
 - ✅ test regex: หัวข่าวจริงที่ต้องโดน ("Why These 5 Stocks Are on Investors' Radars", "Unusual Options Activity") และที่ต้องไม่โดน (ข่าวงบ, ข่าวดาวน์เกรด) · ข่าวแท็ก 6 หุ้นโดนข้าม
 
 ### D2 — ให้คะแนนแบบชุด (prompt `t1`)
+> **โค้ดเสร็จ — รอวัดบน VM** · ผลที่ตัดสินระหว่างทำ: item ที่ไม่ผ่าน validation ทิ้งแค่ตัวนั้น (ไม่ทั้งชุด) แล้วส่งที่เหลือเป็นชุดเล็กลง · `summary_th` เดิมของข่าวเก่าไม่ถูกเขียนทับ · แผงข่าว (N7) แสดง `headline_th` เมื่อไม่มีสรุปเดิม · `LLM_RPM_LIMIT` เริ่มต้นเป็น 2 (TPM 16K) · ไม่สรุปไทยเพิ่มให้ข่าวคะแนน 4–5 (grill: ใช้บทสรุปรายหุ้นแทน)
 - `TriageItem` / `TriageBatch` (Pydantic) แทน `NewsAnalysis` · `headline_th` เสียแล้วเป็น `null` ได้ (D-Q2) · `finalize()` + cap importance เดิมใช้ต่อ
 - analyzer: ชุดละ `LLM_TRIAGE_BATCH` · output เสียแบ่งครึ่ง (D-Q3) · `maxOutputTokens` ตามจำนวนข่าว
 - worker: รอรวมชุดตาม D-Q4 · ลำดับงานตาม D-Q10

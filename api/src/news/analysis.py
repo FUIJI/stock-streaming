@@ -1,17 +1,19 @@
-"""What the LLM must return per article, and the rules applied on top of it.
+"""What the LLM must return per article (triage), and the rules applied on top of it.
 
 The model output is untrusted input: it is validated here, symbols outside the
 article's own tags are dropped, and importance is capped by code rules
-(docs/specs/phase-3c-news.md, Q6 and Q10).
+(docs/specs/phase-3c-news.md Q6/Q10, docs/specs/phase-3d-news-digest.md D-Q1/D-Q2).
 """
 
 import re
 from dataclasses import dataclass
 from typing import Literal
 
+from typing import Any
+
 from pydantic import BaseModel, Field, field_validator
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "t1"
 
 Category = Literal[
     "earnings", "guidance", "analyst", "product", "legal_regulatory", "m_and_a",
@@ -69,27 +71,35 @@ class SymbolAssessment(BaseModel):
     sentiment: float = Field(ge=-1, le=1)
 
 
+HEADLINE_TH_MAX = 100
+
+
 class NewsAnalysis(BaseModel):
+    """Triage of one article: scores plus a one-line Thai headline."""
+
     id: int
-    # Above what the prompt asks for (~200 / ~120 characters), to catch runaway text.
-    summary_th: str = Field(min_length=1, max_length=400)
-    why_it_matters: str = Field(min_length=1, max_length=250)
+    # Optional on purpose (D-Q2): a garbled translation is dropped, the scores are kept.
+    headline_th: str | None = None
     category: Category
     importance: int = Field(ge=1, le=5)
     is_market_wide: bool
     per_symbol: list[SymbolAssessment]
 
-    @field_validator("summary_th", "why_it_matters")
+    @field_validator("headline_th", mode="before")
     @classmethod
-    def not_degenerate(cls, value: str) -> str:
+    def usable_or_none(cls, value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
         value = value.strip()
-        if problem := degeneration(value):
-            raise ValueError(f"degenerate text: {problem}")
+        if not value or len(value) > HEADLINE_TH_MAX or degeneration(value):
+            return None
         return value
 
 
 class BatchAnalysis(BaseModel):
-    items: list[NewsAnalysis]
+    """The reply's envelope; items are validated one by one so one bad item can't sink 25."""
+
+    items: list[Any]
 
 
 @dataclass(frozen=True)
