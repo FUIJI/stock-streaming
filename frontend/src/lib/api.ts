@@ -1,4 +1,5 @@
 import type { BarSession, ChartInterval } from "./market-time";
+import type { NewsItem } from "./news";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -57,3 +58,9 @@ export function fetchCandles(symbol: string, interval: Interval, limit = 300): P
 export const fetchQuotes = () => getJson<Quote[]>("/quotes");
 export const fetchMarketStatus = () => getJson<MarketStatus>("/market/status");
 export const fetchSymbolDetails = () => getJson<SymbolInfo[]>("/symbols/details");
+
+/** Every article for `symbol`, less-relevant ones included (the panel filters locally). */
+export function fetchNews(symbol: string, limit = 50): Promise<NewsItem[]> {
+  const params = new URLSearchParams({ symbol, include_hidden: "true", limit: String(limit) });
+  return getJson(`/news?${params}`);
+}

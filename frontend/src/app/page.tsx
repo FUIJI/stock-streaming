@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import CandlestickChart from "@/components/CandlestickChart";
 import IntervalSelector from "@/components/IntervalSelector";
 import MarketStatusBadge from "@/components/MarketStatusBadge";
+import NewsPanel from "@/components/NewsPanel";
 import QuoteCards from "@/components/QuoteCards";
 import { usePolling } from "@/hooks/usePolling";
 import { useTheme } from "@/hooks/useTheme";
@@ -72,15 +73,18 @@ export default function Home() {
         <p className="notice">Prices are unavailable right now; the chart below still works.</p>
       )}
 
-      <CandlestickChart
-        symbol={symbol}
-        name={shortCompanyName(details[symbol]?.name)}
-        interval={interval}
-        session={market.data?.session ?? null}
-        prevClose={quoteMap[symbol]?.prev_close}
-        theme={theme}
-        toolbar={<IntervalSelector value={interval} onChange={setChartInterval} />}
-      />
+      <div className="main-grid">
+        <CandlestickChart
+          symbol={symbol}
+          name={shortCompanyName(details[symbol]?.name)}
+          interval={interval}
+          session={market.data?.session ?? null}
+          prevClose={quoteMap[symbol]?.prev_close}
+          theme={theme}
+          toolbar={<IntervalSelector value={interval} onChange={setChartInterval} />}
+        />
+        <NewsPanel symbol={symbol} />
+      </div>
     </main>
   );
 }
