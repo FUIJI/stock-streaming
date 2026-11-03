@@ -107,7 +107,8 @@ async def process_once(pool: asyncpg.Pool, provider: ManagedProvider, tracked: s
     rows = await pool.fetch(QUEUE_SQL, now, batch_size)
     if not rows:
         return Outcome(processed=0)
-    if len(rows) < batch_size and min(r["fetched_at"] for r in rows) > now - batch_wait:
+    if (batch_wait and len(rows) < batch_size
+            and min(r["fetched_at"] for r in rows) > now - batch_wait):
         return Outcome(processed=0)  # let the batch fill up a little longer
 
     result = await analyze(provider, [to_item(r, tracked) for r in rows], names)

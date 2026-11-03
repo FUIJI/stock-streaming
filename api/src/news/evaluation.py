@@ -80,7 +80,9 @@ def score(cases: list[dict], answers: dict[int, FinalAnalysis]) -> Report:
             a = got.get(symbol)
             if a is None:
                 continue
-            if expected.get("sentiment") is not None:
+            # Sentiment only matters where the article is about the company: incidental
+            # mentions never reach the outlook card, and their direction is a guess anyway.
+            if expected.get("sentiment") is not None and expected.get("relevant") is not False:
                 ok = direction(a.sentiment) == expected["sentiment"]
                 report.sentiment.add(ok)
                 if not ok:
