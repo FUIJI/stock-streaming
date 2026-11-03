@@ -41,12 +41,22 @@ class NewsItem:
 _REPEATED_CHUNK = re.compile(r"(.{2,30}?)\1{3,}", re.DOTALL)
 # Thai summaries have no business containing CJK (seen: "进进进").
 _CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+# Gemma's reasoning leaking into the answer (seen: "ปัจthought: [thought] {").
+_THOUGHT = re.compile(r"(?<![A-Za-z])thought(?![A-Za-z])|</?think", re.IGNORECASE)
+# A Thai vowel/tone mark can only follow a Thai consonant (seen: "ความเสan์").
+_BROKEN_THAI = re.compile(r"[A-Za-z][\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]")
+# Lowercase Latin glued inside a Thai word. Names are spaced or capitalised ("หุ้นAAPL").
+_GLUED_LATIN = re.compile(r"[\u0e01-\u0e4e][a-z]+[\u0e01-\u0e4e]")
 
 
 def degeneration(text: str) -> str | None:
     """Why `text` looks like broken generation, or None if it looks fine."""
     if _CJK.search(text):
         return "contains CJK characters"
+    for pattern, problem in ((_THOUGHT, "leaked reasoning"), (_BROKEN_THAI, "broken Thai"),
+                             (_GLUED_LATIN, "Latin inside a Thai word")):
+        if match := pattern.search(text):
+            return f"{problem}: {match.group(0)!r}"
     for match in _REPEATED_CHUNK.finditer(text):
         if not any(c.isdigit() for c in match.group(1)):
             return f"repeats {match.group(1)!r}"
@@ -72,6 +82,7 @@ class NewsAnalysis(BaseModel):
     @field_validator("summary_th", "why_it_matters")
     @classmethod
     def not_degenerate(cls, value: str) -> str:
+        value = value.strip()
         if problem := degeneration(value):
             raise ValueError(f"degenerate text: {problem}")
         return value

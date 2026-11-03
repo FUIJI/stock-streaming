@@ -181,6 +181,7 @@ dc run --rm api python -m src.backfill --days 5
 | เปลี่ยนโมเดลหลัก/สำรอง | แก้ `LLM_MODEL` / `LLM_FALLBACK_MODEL` ใน `.env` แล้ว `dc up -d api` |
 | สรุปข่าวใหม่หลังแก้ prompt | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --older-prompt v3` (ใส่เวอร์ชันใหม่ ข่าวที่สรุปด้วยเวอร์ชันนั้นแล้วจะไม่ถูกส่งซ้ำ) |
 | ส่งข่าวที่ failed ไปลองใหม่ | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --status failed` |
+| สรุปใหม่เฉพาะข่าวที่ผลเสีย (เพิ่มตัวตรวจใหม่แล้ว) | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --recheck` (ตรวจสรุปที่เก็บไว้ด้วยกฎปัจจุบัน ส่งเฉพาะข่าวที่ไม่ผ่าน) |
 | ปิดการสรุปข่าวชั่วคราว | `LLM_PROVIDER=off` ใน `.env` แล้ว `dc up -d api` (ข่าวยังเข้ามาและแสดงเป็นภาษาอังกฤษ) |
 
 ---

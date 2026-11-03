@@ -57,6 +57,9 @@ def test_out_of_range_output_is_rejected(bad):
     "ผู้ใช้ iPhone สามารถรับเงินคืนจาก Apple. ,,, ,,, ,,, ,,, ,,, ,,, ,,,",
     "ช่วยให้ค 进进进进进进进(",
     "หุ้น Apple, Palantir -----------------------",
+    "นักลงทุนสนใจหุ้น AAPL, PLTR เนื่องจากปัจจัยพื้นฐานและปัจthought: [thought] {",
+    "อาจส่งผลต่อค่าใช้จ่ายหรือความเสan์เสียชื่อเสียงของ Apple.",
+    "ราคาหุ้นปรับตัวขึ้นหลังจากtheประกาศ",
 ])
 def test_degenerate_text_is_detected(text):
     from src.news.analysis import degeneration
@@ -70,9 +73,15 @@ def test_degenerate_text_is_detected(text):
     "ผู้ใช้ iPhone สามารถรับเงินคืนสูงสุด $95 จาก Apple ผ่านโปรแกรม Siri Promises",
     "รายได้ 1,000,000,000,000 ดอลลาร์ เพิ่มขึ้น 12% จากปีก่อน",  # digit groups repeat legitimately
     "ราคาขยับขึ้นลงเล็กน้อย ๆ ตามตลาด",
+    "Jim Cramer มองว่ากระแสเชิงลบต่อ Apple, Palantir และ Marvell นั้นรุนแรงเกินไป",
+    "หุ้นAAPL และ iPhone รุ่นใหม่ ขายดีในไตรมาส Q3",
 ])
 def test_normal_text_is_accepted(text):
     from src.news.analysis import degeneration
 
     assert degeneration(text) is None
     assert analysis(summary_th=text).summary_th == text
+
+
+def test_surrounding_whitespace_is_trimmed():
+    assert analysis(summary_th="สรุป.  ").summary_th == "สรุป."
