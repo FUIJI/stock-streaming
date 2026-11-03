@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from src.migrate import migrate
 from src.news.llm import LLMError
 from src.news.managed import ManagedProvider, Quota
-from src.news.reprocess import reset
+from src.news.reprocess import failing_checks, requeue, reset
 from src.news.store import Article, save_articles
 from src.news.worker import process_once
 
@@ -127,3 +127,19 @@ async def test_reprocess_requeues_by_status_and_prompt_version(pg_pool):
     assert (await status(pg_pool, 2))["ai_status"] == "done"
     # The old summary stays visible until the new one replaces it.
     assert await pg_pool.fetchval("SELECT count(*) FROM news_ai WHERE news_id = 1") == 1
+
+
+async def test_recheck_requeues_only_summaries_that_fail_todays_checks(pg_pool):
+    await migrate(pg_pool)
+    await save_articles(pg_pool, [article(1, 30), article(2, 5)], False)
+    await run(pg_pool, managed(answer(2)))
+    await run(pg_pool, managed(answer(1)))
+    # Saved before the leaked-reasoning check existed:
+    await pg_pool.execute(
+        "UPDATE news_ai SET summary_th = 'ปัจจัยพื้นฐานและปัจthought: [thought] {' WHERE news_id = 1")
+
+    bad = await failing_checks(pg_pool, NOW - timedelta(days=1))
+    assert bad == [1]
+    assert await requeue(pg_pool, bad) == 1
+    assert (await status(pg_pool, 1))["ai_status"] == "pending"
+    assert (await status(pg_pool, 2))["ai_status"] == "done"
