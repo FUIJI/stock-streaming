@@ -34,6 +34,7 @@ class LLMStats:
     pending: int = 0
     failed: int = 0
     done: int = 0
+    skipped: int = 0
     last_success_at: float | None = None
     last_error: str | None = None
     paused_until: datetime | None = None
@@ -125,8 +126,9 @@ async def process_once(pool: asyncpg.Pool, provider: ManagedProvider, tracked: s
 async def refresh_counts(pool: asyncpg.Pool, stats: LLMStats) -> None:
     counts = {r["ai_status"]: r["n"] for r in await pool.fetch(
         "SELECT ai_status, count(*) AS n FROM news GROUP BY ai_status")}
-    stats.pending, stats.failed, stats.done = (
-        counts.get("pending", 0), counts.get("failed", 0), counts.get("done", 0))
+    stats.pending, stats.failed, stats.done, stats.skipped = (
+        counts.get("pending", 0), counts.get("failed", 0), counts.get("done", 0),
+        counts.get("skipped", 0))
 
 
 async def run_worker(pool: asyncpg.Pool, provider: ManagedProvider, tracked: set[str],

@@ -8,6 +8,7 @@ from datetime import datetime
 import asyncpg
 
 from .analysis import NewsItem
+from .rules import skip_reason
 
 _TAGS = re.compile(r"<[^>]+>")
 
@@ -48,12 +49,13 @@ class Article:
         )
 
 
-# New articles are inserted pending. An existing article is only touched when
-# Alpaca edited it (updated_at moved), and then goes back to the LLM queue.
+# New articles are inserted pending (or skipped, by rules.py). An existing article is
+# only touched when Alpaca edited it (updated_at moved), and then goes back to the queue.
 UPSERT_NEWS_SQL = """
     INSERT INTO news (id, headline, summary, author, source, url, symbols,
-                      created_at, updated_at, backfilled)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                      created_at, updated_at, backfilled, ai_status, skip_reason)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+            CASE WHEN $11::text IS NULL THEN 'pending' ELSE 'skipped' END, $11)
     ON CONFLICT (id) DO UPDATE SET
         headline = EXCLUDED.headline,
         summary = EXCLUDED.summary,
@@ -62,7 +64,8 @@ UPSERT_NEWS_SQL = """
         symbols = EXCLUDED.symbols,
         updated_at = EXCLUDED.updated_at,
         fetched_at = now(),
-        ai_status = 'pending',
+        ai_status = EXCLUDED.ai_status,
+        skip_reason = EXCLUDED.skip_reason,
         ai_attempts = 0,
         ai_next_attempt_at = now(),
         ai_error = NULL
@@ -73,7 +76,7 @@ UPSERT_NEWS_SQL = """
 async def save_articles(pool: asyncpg.Pool, articles: list[Article], backfilled: bool) -> None:
     await pool.executemany(UPSERT_NEWS_SQL, [
         (a.id, a.headline, a.summary, a.author, a.source, a.url, a.symbols,
-         a.created_at, a.updated_at, backfilled)
+         a.created_at, a.updated_at, backfilled, skip_reason(a.headline, a.symbols))
         for a in articles
     ])
 

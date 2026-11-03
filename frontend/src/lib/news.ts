@@ -25,7 +25,8 @@ export interface NewsItem {
   created_at: string;
   updated_at: string;
   backfilled: boolean;
-  ai_status: "pending" | "done" | "failed";
+  ai_status: "pending" | "done" | "failed" | "skipped";
+  skip_reason: string | null;
   ai: NewsAI | null;
   per_symbol: { symbol: string; relevance: number; sentiment: number }[];
   reaction: Record<string, { m5: number | null; m30: number | null }>;

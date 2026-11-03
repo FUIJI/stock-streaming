@@ -7,7 +7,7 @@ function item(id: number, importance: number | null, hidden = false): NewsItem {
   return {
     id, headline: `News ${id}`, summary: "", author: null, source: "benzinga", url: null,
     symbols: ["AAPL"], created_at: "2026-11-03T03:25:37Z", updated_at: "2026-11-03T03:25:37Z",
-    backfilled: false, ai_status: importance === null ? "pending" : "done",
+    backfilled: false, ai_status: importance === null ? "pending" : "done", skip_reason: null,
     ai: importance === null ? null : {
       summary_th: "สรุป", why_it_matters: "เพราะ", category: "product", importance,
       is_market_wide: false, model: "gemma", prompt_version: "v3", processed_at: "",

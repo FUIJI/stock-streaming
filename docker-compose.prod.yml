@@ -67,6 +67,8 @@ services:
       # News for tracked symbols (docs/specs/phase-3c-news.md); 0 disables polling
       NEWS_POLL_SEC: ${NEWS_POLL_SEC:-60}
       NEWS_BACKFILL_DAYS: ${NEWS_BACKFILL_DAYS:-3}
+      # Articles tagged with more symbols than this are market roundups: never sent to the LLM
+      NEWS_MAX_TAGS: ${NEWS_MAX_TAGS:-5}
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       # Measured on the VM: Gemma answers (~25s/article); Flash was often overloaded.
       LLM_MODEL: ${LLM_MODEL:-gemma-4-26b-a4b-it}

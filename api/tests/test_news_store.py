@@ -20,7 +20,7 @@ RAW = {
     "source": "benzinga",
     "summary": "Will the S&amp;P 500 open higher? Wall Street weighs Apple earnings and "
                "Yardeni&#39;s <b>market</b> outlook.",
-    "symbols": ["AAPL", "DIA", "PLTR", "POLUSD", "QQQ", "SPY"],
+    "symbols": ["AAPL", "QQQ", "SPY"],
     "updated_at": "2026-11-02T05:47:19Z",
     "url": "https://www.benzinga.com/markets/62767926",
 }
