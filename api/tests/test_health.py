@@ -97,3 +97,20 @@ def test_cors_allows_exact_origins_and_the_preview_pattern(monkeypatch):
     finally:
         monkeypatch.delenv("CORS_ORIGIN_REGEX")
         importlib.reload(main_module)
+
+
+def test_llm_section_reads_the_providers_live_error(client):
+    from src.news.managed import ManagedProvider, Quota
+    from src.news.worker import LLMStats
+
+    class Stub:
+        model = "gemma"
+
+    provider = ManagedProvider([Stub()], Quota(daily_limit=200, per_minute=10))
+    provider.last_error = "gemma: Gemini 503: overloaded"
+    app.state.llm, app.state.llm_stats = provider, LLMStats(models="gemma", pending=120)
+    try:
+        llm = client.get("/health").json()["llm"]
+        assert llm["last_error"].startswith("gemma: Gemini 503") and llm["pending"] == 120
+    finally:
+        app.state.llm = app.state.llm_stats = None

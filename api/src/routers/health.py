@@ -47,7 +47,9 @@ async def health(request: Request) -> dict:
             "failed": llm.failed,
             "last_success_at": (datetime.fromtimestamp(llm.last_success_at, tz=UTC)
                                 if llm.last_success_at else None),
-            "last_error": llm.last_error,
+            # Read live from the provider: a round can take minutes (slow model + fallback).
+            "last_error": llm_provider.last_error or llm.last_error,
+            "last_model": llm_provider.last_model,
             "paused_until": llm.paused_until,
         },
     }

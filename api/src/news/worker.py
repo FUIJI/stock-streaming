@@ -138,6 +138,10 @@ async def run_worker(pool: asyncpg.Pool, provider: ManagedProvider, tracked: set
     stats.models = " -> ".join(p.model for p in provider.providers)
     names: dict[str, str] = {}
     names_at = 0.0
+    try:
+        await refresh_counts(pool, stats)  # /health shows the real backlog from the start
+    except Exception:
+        log.exception("Could not count the news queue")
     while True:
         try:
             if time.monotonic() - names_at > 3600:
