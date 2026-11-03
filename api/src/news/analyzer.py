@@ -3,7 +3,7 @@
 import logging
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from pydantic import ValidationError
 
@@ -39,12 +39,14 @@ class AnalyzeResult:
 
 
 async def _call(provider: LLMProvider, items: list[NewsItem], names: dict[str, str],
-                result: AnalyzeResult) -> BatchAnalysis:
+                result: AnalyzeResult) -> tuple[BatchAnalysis, str]:
+    """The validated batch and the model that answered it."""
     result.calls += 1
     raw = await provider.generate_json(SYSTEM_PROMPT, build_user_message(items, names),
                                        RESPONSE_SCHEMA, max_tokens=output_budget(len(items)))
+    model = getattr(provider, "last_model", None) or provider.model
     try:
-        return BatchAnalysis.model_validate_json(extract_json(raw))
+        return BatchAnalysis.model_validate_json(extract_json(raw)), model
     except ValidationError as exc:
         raise LLMError(f"invalid model output: {str(exc)[:300]}", retryable=True,
                        bad_output=True) from exc
@@ -59,10 +61,11 @@ async def analyze(provider: LLMProvider, items: list[NewsItem],
 
     if len(items) > 1:
         try:
-            batch = await _call(provider, items, names, result)
+            batch, model = await _call(provider, items, names, result)
             for analysis in batch.items:
                 if analysis.id in by_id and analysis.id not in result.done:
-                    result.done[analysis.id] = finalize(analysis, by_id[analysis.id])
+                    result.done[analysis.id] = replace(
+                        finalize(analysis, by_id[analysis.id]), model=model)
             leftover = [item for item in items if item.id not in result.done]
         except LLMError as exc:
             if not exc.bad_output:
@@ -73,12 +76,12 @@ async def analyze(provider: LLMProvider, items: list[NewsItem],
 
     for i, item in enumerate(leftover):
         try:
-            batch = await _call(provider, [item], names, result)
+            batch, model = await _call(provider, [item], names, result)
             match = next((a for a in batch.items if a.id == item.id), None)
             if match is None:
                 raise LLMError("model output did not include this article", retryable=True,
                                bad_output=True)
-            result.done[item.id] = finalize(match, item)
+            result.done[item.id] = replace(finalize(match, item), model=model)
         except LLMError as exc:
             result.failed[item.id] = exc
             if not exc.bad_output:
