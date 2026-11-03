@@ -94,6 +94,7 @@ Alpaca News ─► news (pending)                                   [poller เ�
 - ✅ HTTP จำลอง: ชุดถูก, ชุดเสีย → แบ่งครึ่ง, `headline_th` เสีย → null แต่คะแนนยังเก็บ, id ที่ไม่ได้ส่งไปถูกทิ้ง · ทดสอบจริงบน VM ด้วยชุด 25 ข่าว ถ้า Gemma หลุดให้ลด batch
 
 ### D3 — ชุดทดสอบการให้คะแนน (แทน N6)
+> **โค้ดเสร็จ — รอผู้ใช้ติดป้าย** · `export_eval` พิมพ์ออก stdout (container ลบไฟล์หลังรัน) และไม่ใส่คำตอบของ AI ในไฟล์ · `eval --runs N` วัดความสม่ำเสมอข้ามรอบด้วย · คะแนน importance นับหลังกฎ cap · วิธีติดป้ายอยู่ใน `api/tests/news_eval/README.md`
 - `python -m src.news.export_eval --limit 30` → `api/tests/news_eval/cases.json` · ผู้ใช้ติดป้าย importance, sentiment (บวก/ลบ/กลาง), relevance (≥ 0.5 หรือไม่)
 - `python -m src.news.eval`: importance ต่างไม่เกิน ±1, ทิศ sentiment ตรง, relevance ตรง, `headline_th` ผ่านตัวตรวจ · รายงานเป็น % และรายการที่ผิด
 - ไม่รันใน CI · ✅ เกณฑ์ผ่านก่อนไป D4: importance ±1 ≥ 85%, sentiment ≥ 80%
