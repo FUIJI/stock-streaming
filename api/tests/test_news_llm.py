@@ -229,4 +229,4 @@ async def test_filtered_answers_are_bad_output_not_an_outage():
 def test_prompt_version_is_triage():
     from src.news.analysis import PROMPT_VERSION
 
-    assert PROMPT_VERSION == "t1"
+    assert PROMPT_VERSION == "t2"
