@@ -9,7 +9,7 @@ ITEM = NewsItem(id=1, headline="h", summary="s", tags=["AAPL", "MSFT", "SPY"],
 
 def analysis(**overrides) -> NewsAnalysis:
     base = {
-        "id": 1, "summary_th": "สรุป", "why_it_matters": "เหตุผล", "category": "earnings",
+        "id": 1, "headline_th": "หัวข่าว", "category": "earnings",
         "importance": 5, "is_market_wide": False,
         "per_symbol": [{"symbol": "AAPL", "relevance": 0.9, "sentiment": 0.6}],
     }
@@ -42,7 +42,7 @@ def test_symbols_outside_the_articles_tracked_tags_are_dropped():
 
 
 @pytest.mark.parametrize("bad", [
-    {"importance": 6}, {"importance": 0}, {"category": "rumour"}, {"summary_th": ""},
+    {"importance": 6}, {"importance": 0}, {"category": "rumour"}, {"id": None},
     {"per_symbol": [{"symbol": "AAPL", "relevance": 1.5, "sentiment": 0}]},
     {"per_symbol": [{"symbol": "AAPL", "relevance": 0.5, "sentiment": -2}]},
 ])
@@ -65,8 +65,8 @@ def test_degenerate_text_is_detected(text):
     from src.news.analysis import degeneration
 
     assert degeneration(text) is not None
-    with pytest.raises(ValidationError, match="degenerate"):
-        analysis(summary_th=text)
+    # D-Q2: the headline is dropped, the article's scores are still usable
+    assert analysis(headline_th=text).headline_th is None
 
 
 @pytest.mark.parametrize("text", [
@@ -80,8 +80,12 @@ def test_normal_text_is_accepted(text):
     from src.news.analysis import degeneration
 
     assert degeneration(text) is None
-    assert analysis(summary_th=text).summary_th == text
+    assert analysis(headline_th=text).headline_th == text
 
 
-def test_surrounding_whitespace_is_trimmed():
-    assert analysis(summary_th="สรุป.  ").summary_th == "สรุป."
+def test_headline_th_is_trimmed_and_length_capped():
+    assert analysis(headline_th="หัวข่าว.  ").headline_th == "หัวข่าว."
+    assert analysis(headline_th="ก" * 101).headline_th is None
+    assert analysis(headline_th="").headline_th is None
+    assert analysis(headline_th=None).headline_th is None
+    assert analysis(headline_th=42).headline_th is None

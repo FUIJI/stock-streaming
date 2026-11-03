@@ -16,7 +16,7 @@ NAMES = {"AAPL": "Apple Inc.", "MSFT": "Microsoft Corporation"}
 
 
 def item_json(news_id, symbol, importance=4):
-    return {"id": news_id, "summary_th": "สรุปข่าว", "why_it_matters": "สำคัญเพราะ...",
+    return {"id": news_id, "headline_th": "หัวข่าวไทย",
             "category": "earnings", "importance": importance, "is_market_wide": False,
             "per_symbol": [{"symbol": symbol, "relevance": 0.9, "sentiment": 0.5}]}
 
@@ -62,22 +62,43 @@ async def test_request_uses_structured_output_and_no_tools():
 async def test_thought_parts_are_ignored():
     fake = FakeGemini(gemini_reply({"items": [item_json(1, "AAPL")]}, thought=True))
     result = await analyze(fake.provider(), ITEMS[:1], NAMES)
-    assert result.done[1].analysis.summary_th == "สรุปข่าว"
+    assert result.done[1].analysis.headline_th == "หัวข่าวไทย"
 
 
-async def test_broken_batch_output_is_retried_one_article_at_a_time():
+async def test_broken_batch_output_is_split_in_halves():
     fake = FakeGemini(gemini_reply("{not json"),
                       gemini_reply({"items": [item_json(1, "AAPL")]}),
                       gemini_reply({"items": [item_json(2, "MSFT")]}))
     result = await analyze(fake.provider(), ITEMS, NAMES)
-    assert sorted(result.done) == [1, 2] and result.calls == 3
+    assert sorted(result.done) == [1, 2] and result.calls == 3 and result.splits == 1
+
+
+async def test_halving_goes_down_to_single_articles_only_where_needed():
+    items = [NewsItem(id=i, headline=f"h{i}", summary="", tags=["AAPL"], tracked=["AAPL"])
+             for i in range(1, 5)]
+    fake = FakeGemini(gemini_reply("{not json"),  # [1,2,3,4] -> halves
+                      gemini_reply({"items": [item_json(1, "AAPL"), item_json(2, "AAPL")]}),
+                      gemini_reply("{not json"),  # [3,4] -> halves
+                      gemini_reply({"items": [item_json(3, "AAPL")]}),
+                      gemini_reply("{not json"))  # [4] alone fails: reported, not raised
+    result = await analyze(fake.provider(), items, NAMES)
+    assert sorted(result.done) == [1, 2, 3] and result.failed[4].bad_output
+    assert (result.calls, result.splits) == (5, 2)
 
 
 async def test_only_articles_missing_from_the_batch_are_retried():
     fake = FakeGemini(gemini_reply({"items": [item_json(1, "AAPL")]}),
                       gemini_reply({"items": [item_json(2, "MSFT")]}))
     result = await analyze(fake.provider(), ITEMS, NAMES)
-    assert sorted(result.done) == [1, 2] and result.calls == 2
+    assert sorted(result.done) == [1, 2] and result.calls == 2 and result.splits == 0
+
+
+async def test_one_invalid_item_does_not_sink_the_batch():
+    fake = FakeGemini(gemini_reply({"items": [item_json(1, "AAPL", importance=9),  # invalid
+                                              item_json(2, "MSFT"), item_json(99, "AAPL")]}),
+                      gemini_reply({"items": [item_json(1, "AAPL")]}))
+    result = await analyze(fake.provider(), ITEMS, NAMES)
+    assert sorted(result.done) == [1, 2] and result.calls == 2  # id 99 was never sent: ignored
 
 
 async def test_an_article_that_keeps_failing_is_reported_not_raised():
@@ -88,13 +109,20 @@ async def test_an_article_that_keeps_failing_is_reported_not_raised():
     assert list(result.done) == [2] and result.failed[1].retryable
 
 
+async def test_garbled_thai_headline_is_dropped_but_the_scores_kept():
+    bad = {**item_json(1, "AAPL"), "headline_th": "ความเสan์เสียชื่อ"}
+    result = await analyze(FakeGemini(gemini_reply({"items": [bad]})).provider(), ITEMS[:1], NAMES)
+    final = result.done[1]
+    assert final.analysis.headline_th is None and final.importance == 4
+
+
 async def test_rate_limits_are_retryable_and_do_not_multiply_calls():
     rate_limited = FakeGemini(httpx.Response(429, text="quota"))
     result = await analyze(rate_limited.provider(), ITEMS, NAMES)
     assert result.calls == 1 and all(e.retryable for e in result.failed.values())
 
 
-async def test_http_errors_stop_the_one_by_one_retries_too():
+async def test_http_errors_stop_the_halving_retries_too():
     fake = FakeGemini(gemini_reply("{not json"), httpx.Response(503, text="overloaded"))
     result = await analyze(fake.provider(), ITEMS, NAMES)
     assert result.calls == 2 and sorted(result.failed) == [1, 2]
@@ -144,10 +172,10 @@ async def test_output_is_capped_per_article_in_the_batch():
     fake = FakeGemini(gemini_reply({"items": [item_json(1, "AAPL"), item_json(2, "MSFT")]}))
     await analyze(fake.provider(), ITEMS, NAMES)
     assert json.loads(fake.requests[0].content)["generationConfig"]["maxOutputTokens"] == \
-        1024 + 600 * 2
+        1024 + 200 * 2
 
 
-async def test_hitting_the_token_limit_retries_articles_one_by_one():
+async def test_hitting_the_token_limit_retries_in_halves():
     cut_off = httpx.Response(200, json={"candidates": [
         {"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": '{"items": [{"id": 1,'}]}}]})
     fake = FakeGemini(cut_off,
@@ -156,14 +184,30 @@ async def test_hitting_the_token_limit_retries_articles_one_by_one():
     result = await analyze(fake.provider(), ITEMS, NAMES)
     assert sorted(result.done) == [1, 2] and result.calls == 3
     single = json.loads(fake.requests[1].content)["generationConfig"]["maxOutputTokens"]
-    assert single == 1024 + 600
+    assert single == 1024 + 200
 
 
-def test_prompt_v2_sets_a_length_budget_and_format_rules():
+def test_prompt_keeps_the_format_rules():
     from src.news.prompt import SYSTEM_PROMPT
 
-    assert "at most 2 short sentences" in SYSTEM_PROMPT
     assert "No markdown, no code fences" in SYSTEM_PROMPT
+    assert "own words" in SYSTEM_PROMPT
+
+
+def test_article_summaries_are_cut_before_sending():
+    from src.news.prompt import build_user_message
+
+    long = NewsItem(id=1, headline="h", summary="x" * 1000, tags=["AAPL"], tracked=["AAPL"])
+    assert len(json.loads(build_user_message([long], NAMES))["articles"][0]["summary"]) == 300
+
+
+async def test_token_usage_is_added_up():
+    reply = httpx.Response(200, json={
+        "candidates": [{"content": {"parts": [{"text": json.dumps(
+            {"items": [item_json(1, "AAPL"), item_json(2, "MSFT")]})}]}}],
+        "usageMetadata": {"promptTokenCount": 900, "candidatesTokenCount": 150}})
+    result = await analyze(FakeGemini(reply).provider(), ITEMS, NAMES)
+    assert (result.prompt_tokens, result.output_tokens) == (900, 150)
 
 
 async def test_filtered_answers_are_bad_output_not_an_outage():
@@ -182,8 +226,7 @@ async def test_filtered_answers_are_bad_output_not_an_outage():
     assert flash.requests == []  # the 20-a-day fallback is not spent on it
 
 
-def test_prompt_v3_asks_for_own_words():
+def test_prompt_version_is_triage():
     from src.news.analysis import PROMPT_VERSION
-    from src.news.prompt import SYSTEM_PROMPT
 
-    assert PROMPT_VERSION == "v3" and "never copy sentences" in SYSTEM_PROMPT
+    assert PROMPT_VERSION == "t1"

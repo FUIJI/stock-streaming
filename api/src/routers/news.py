@@ -20,8 +20,9 @@ class SymbolView(BaseModel):
 
 
 class AIView(BaseModel):
-    summary_th: str
-    why_it_matters: str
+    headline_th: str | None  # one-line Thai headline (triage); None if it was unusable
+    summary_th: str | None  # Phase 3c per-article summaries only; new articles have none
+    why_it_matters: str | None
     category: str
     importance: int
     is_market_wide: bool
@@ -58,7 +59,7 @@ class NewsView(BaseModel):
 # `symbol`, to every tracked symbol). Articles without AI output are never hidden.
 NEWS_SQL = f"""
     SELECT n.*, a.news_id IS NOT NULL AS has_ai,
-           a.summary_th, a.why_it_matters, a.category, a.importance, a.is_market_wide,
+           a.headline_th, a.summary_th, a.why_it_matters, a.category, a.importance, a.is_market_wide,
            a.model, a.prompt_version, a.processed_at,
            a.news_id IS NOT NULL AND coalesce(r.relevance, 0) < {RELEVANCE_THRESHOLD} AS hidden
     FROM news n

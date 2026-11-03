@@ -69,6 +69,7 @@ class ManagedProvider:
         self.model = providers[0].model
         self.last_model: str | None = None
         self.last_error: str | None = None
+        self.last_usage: dict = {}
 
     async def generate_json(self, system: str, user: str, schema: dict,
                             max_tokens: int | None = None) -> str:
@@ -84,6 +85,7 @@ class ManagedProvider:
                 error = exc
                 continue
             self.last_model = provider.model
+            self.last_usage = getattr(provider, "last_usage", {})
             return text
         assert error is not None
         raise error

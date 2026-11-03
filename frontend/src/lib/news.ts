@@ -4,8 +4,9 @@ import { DISPLAY_TZ } from "./market-time.ts";
 export const IMPORTANT = 4; // the "Important" filter and (later) alerts
 
 export interface NewsAI {
-  summary_th: string;
-  why_it_matters: string;
+  headline_th: string | null; // one-line Thai headline (Phase 3d triage)
+  summary_th: string | null; // Phase 3c articles only
+  why_it_matters: string | null;
   category: string;
   importance: number;
   is_market_wide: boolean;

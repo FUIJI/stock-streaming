@@ -8,7 +8,7 @@ from src.news.llm import LLMError
 from src.news.managed import ManagedProvider, Quota, QuotaExhausted
 
 ITEM = NewsItem(id=1, headline="h", summary="s", tags=["AAPL"], tracked=["AAPL"])
-ANSWER = ('{"items": [{"id": 1, "summary_th": "สรุป", "why_it_matters": "เพราะ",'
+ANSWER = ('{"items": [{"id": 1, "headline_th": "หัวข่าว",'
           ' "category": "product", "importance": 4, "is_market_wide": false,'
           ' "per_symbol": [{"symbol": "AAPL", "relevance": 0.9, "sentiment": 0.3}]}]}')
 
