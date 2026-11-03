@@ -74,7 +74,8 @@ services:
       LLM_BATCH_SIZE: ${LLM_BATCH_SIZE:-1}
       LLM_DAILY_CALL_LIMIT: ${LLM_DAILY_CALL_LIMIT:-200}
       LLM_RPM_LIMIT: ${LLM_RPM_LIMIT:-10}
-      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-}
+      # Measured on the VM: Gemma loops at the default (~1.0) and at 0; 0.2 was clean.
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
       LLM_THINKING_LEVEL: ${LLM_THINKING_LEVEL:-low}
       LLM_TIMEOUT_SEC: ${LLM_TIMEOUT_SEC:-300}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

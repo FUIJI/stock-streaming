@@ -49,3 +49,30 @@ def test_symbols_outside_the_articles_tracked_tags_are_dropped():
 def test_out_of_range_output_is_rejected(bad):
     with pytest.raises(ValidationError):
         analysis(**bad)
+
+
+@pytest.mark.parametrize("text", [
+    # Seen on the VM with gemma-4-26b-a4b-it:
+    "มุมมองข้ามผ่าน โอกาส-อุตดารณ์โอกาส-อุตดารณ์โอกาส-อุตดารณ์โอกาส-อุตดารณ์โอกาส-อุตดาร0.1",
+    "ผู้ใช้ iPhone สามารถรับเงินคืนจาก Apple. ,,, ,,, ,,, ,,, ,,, ,,, ,,,",
+    "ช่วยให้ค 进进进进进进进(",
+    "หุ้น Apple, Palantir -----------------------",
+])
+def test_degenerate_text_is_detected(text):
+    from src.news.analysis import degeneration
+
+    assert degeneration(text) is not None
+    with pytest.raises(ValidationError, match="degenerate"):
+        analysis(summary_th=text)
+
+
+@pytest.mark.parametrize("text", [
+    "ผู้ใช้ iPhone สามารถรับเงินคืนสูงสุด $95 จาก Apple ผ่านโปรแกรม Siri Promises",
+    "รายได้ 1,000,000,000,000 ดอลลาร์ เพิ่มขึ้น 12% จากปีก่อน",  # digit groups repeat legitimately
+    "ราคาขยับขึ้นลงเล็กน้อย ๆ ตามตลาด",
+])
+def test_normal_text_is_accepted(text):
+    from src.news.analysis import degeneration
+
+    assert degeneration(text) is None
+    assert analysis(summary_th=text).summary_th == text
