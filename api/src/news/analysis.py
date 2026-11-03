@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 Category = Literal[
     "earnings", "guidance", "analyst", "product", "legal_regulatory", "m_and_a",
