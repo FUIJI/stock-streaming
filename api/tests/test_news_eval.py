@@ -108,3 +108,34 @@ def test_the_committed_case_file_is_complete():
     for c in cases:
         assert set(c["label"]["per_symbol"]) == set(c["tracked"])
         assert c["label"]["importance"] in {1, 2, 3, 4, 5}
+
+
+async def test_eval_retries_articles_the_service_could_not_answer():
+    import json as _json
+
+    from src.news.eval import analyze_in_batches
+    from src.news.llm import LLMError
+
+    class Flaky:
+        model, calls = "gemma", 0
+
+        async def generate_json(self, system, user, schema, max_tokens=None):
+            self.calls += 1
+            if self.calls == 1:
+                raise LLMError("Gemini 503: high demand", retryable=True)
+            ids = [a["id"] for a in _json.loads(user)["articles"]]
+            return _json.dumps({"items": [
+                {"id": i, "headline_th": "ห", "category": "other", "importance": 3,
+                 "is_market_wide": False,
+                 "per_symbol": [{"symbol": "AAPL", "relevance": 1, "sentiment": 0}]}
+                for i in ids]})
+
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    items = [to_item(case(i)) for i in range(1, 5)]
+    result = await analyze_in_batches(Flaky(), items, {}, batch=10, waits=(60, 180),
+                                      sleep=fake_sleep)
+    assert sorted(result.done) == [1, 2, 3, 4] and not result.failed and slept == [60]

@@ -43,18 +43,42 @@ def pct(rate: float | None) -> str:
     return "  n/a" if rate is None else f"{rate * 100:5.1f}%"
 
 
-async def analyze_in_batches(provider, items, names, batch: int) -> AnalyzeResult:
-    """Same batch size as the worker sends (LLM_TRIAGE_BATCH), not all cases at once."""
+RETRY_WAITS = (60.0, 180.0)  # seconds; Gemma's free tier often answers 503/500 for a while
+
+
+async def analyze_in_batches(provider, items, names, batch: int,
+                             waits=RETRY_WAITS, sleep=asyncio.sleep) -> AnalyzeResult:
+    """Same batch size as the worker sends (LLM_TRIAGE_BATCH), not all cases at once.
+
+    Articles that failed because the service was unavailable (5xx, 429, timeout) are
+    tried again after a pause, like the worker would; bad answers are not (they count).
+    """
     total = AnalyzeResult()
-    for n, start in enumerate(range(0, len(items), batch), 1):
-        print(f"  batch {n}/{-(-len(items) // batch)} ...", file=sys.stderr, flush=True)
-        part = await analyze(provider, items[start:start + batch], names)
-        total.done.update(part.done)
-        total.failed.update(part.failed)
-        total.calls += part.calls
-        total.splits += part.splits
-        total.prompt_tokens += part.prompt_tokens
-        total.output_tokens += part.output_tokens
+
+    async def one_pass(todo):
+        for n, start in enumerate(range(0, len(todo), batch), 1):
+            print(f"  batch {n}/{-(-len(todo) // batch)} ...", file=sys.stderr, flush=True)
+            part = await analyze(provider, todo[start:start + batch], names)
+            total.done.update(part.done)
+            for news_id in part.done:
+                total.failed.pop(news_id, None)
+            total.failed.update(part.failed)
+            total.calls += part.calls
+            total.splits += part.splits
+            total.prompt_tokens += part.prompt_tokens
+            total.output_tokens += part.output_tokens
+
+    await one_pass(items)
+    for wait in waits:
+        unavailable = [i for i in items if i.id in total.failed
+                       and not total.failed[i.id].bad_output and total.failed[i.id].retryable]
+        if not unavailable:
+            break
+        print(f"  {len(unavailable)} articles hit an unavailable service "
+              f"({total.failed[unavailable[0].id]}); retrying in {wait:.0f}s",
+              file=sys.stderr, flush=True)
+        await sleep(wait)
+        await one_pass(unavailable)
     return total
 
 
