@@ -5,10 +5,11 @@ article's own tags are dropped, and importance is capped by code rules
 (docs/specs/phase-3c-news.md, Q6 and Q10).
 """
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 PROMPT_VERSION = "v3"
 
@@ -35,6 +36,23 @@ class NewsItem:
     tracked: list[str]  # the tags we follow: the only symbols the model may assess
 
 
+# The same short chunk 4+ times in a row ("โอกาส-อุตดารณ์โอกาส-อุตดารณ์...", ",,, ,,, ,,,")
+# is a model stuck in a loop. Chunks with digits are exempt: "1,000,000,000" is fine.
+_REPEATED_CHUNK = re.compile(r"(.{2,30}?)\1{3,}", re.DOTALL)
+# Thai summaries have no business containing CJK (seen: "进进进").
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]")
+
+
+def degeneration(text: str) -> str | None:
+    """Why `text` looks like broken generation, or None if it looks fine."""
+    if _CJK.search(text):
+        return "contains CJK characters"
+    for match in _REPEATED_CHUNK.finditer(text):
+        if not any(c.isdigit() for c in match.group(1)):
+            return f"repeats {match.group(1)!r}"
+    return None
+
+
 class SymbolAssessment(BaseModel):
     symbol: str
     relevance: float = Field(ge=0, le=1)
@@ -43,13 +61,20 @@ class SymbolAssessment(BaseModel):
 
 class NewsAnalysis(BaseModel):
     id: int
-    # Generous ceilings: the prompt asks for far less; these only catch runaway text.
-    summary_th: str = Field(min_length=1, max_length=600)
-    why_it_matters: str = Field(min_length=1, max_length=300)
+    # Above what the prompt asks for (~200 / ~120 characters), to catch runaway text.
+    summary_th: str = Field(min_length=1, max_length=400)
+    why_it_matters: str = Field(min_length=1, max_length=250)
     category: Category
     importance: int = Field(ge=1, le=5)
     is_market_wide: bool
     per_symbol: list[SymbolAssessment]
+
+    @field_validator("summary_th", "why_it_matters")
+    @classmethod
+    def not_degenerate(cls, value: str) -> str:
+        if problem := degeneration(value):
+            raise ValueError(f"degenerate text: {problem}")
+        return value
 
 
 class BatchAnalysis(BaseModel):
