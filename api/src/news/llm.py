@@ -1,6 +1,6 @@
-"""LLM providers behind one small interface (LLM_PROVIDER / LLM_MODEL)."""
+"""LLM providers behind one small interface. Configuration from the environment
+(models, fallback, quota) lives in managed.py."""
 
-import os
 import time
 from typing import Protocol
 
@@ -88,24 +88,3 @@ class GeminiProvider:
     async def aclose(self) -> None:
         await self._http.aclose()
 
-
-def provider_from_env() -> LLMProvider | None:
-    """None when no provider is configured: articles are then shown untranslated."""
-    name = os.environ.get("LLM_PROVIDER", "gemini").lower()
-    if name in ("", "off", "none"):
-        return None
-    if name == "gemini":
-        key = os.environ.get("GEMINI_API_KEY", "")
-        if not key:
-            return None
-        temperature = os.environ.get("LLM_TEMPERATURE", "")
-        return GeminiProvider(
-            key,
-            os.environ.get("LLM_MODEL", "gemini-3.8-flash"),
-            temperature=float(temperature) if temperature else None,
-            thinking_level=os.environ.get("LLM_THINKING_LEVEL", "low") or None,
-            base_url=os.environ.get("GEMINI_BASE_URL", GEMINI_URL),
-            # Gemma on the free tier took ~30s per article: leave room for a batch.
-            timeout=float(os.environ.get("LLM_TIMEOUT_SEC", "300")),
-        )
-    raise RuntimeError(f"Unknown LLM_PROVIDER: {name!r} (expected gemini|off)")

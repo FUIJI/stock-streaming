@@ -27,6 +27,8 @@ async def health(request: Request) -> dict:
     version = deployed image tag; the deploy workflow waits for it to change.
     """
     news = getattr(request.app.state, "news", None)
+    llm = getattr(request.app.state, "llm_stats", None)
+    llm_provider = getattr(request.app.state, "llm", None)
     return {
         "status": "ok",
         "version": os.environ.get("APP_VERSION", "dev"),
@@ -35,6 +37,18 @@ async def health(request: Request) -> dict:
             "last_poll_at": (datetime.fromtimestamp(news.last_poll_at, tz=UTC)
                              if news.last_poll_at else None),
             "last_error": news.last_error,
+        },
+        "llm": None if llm is None or llm_provider is None else {
+            "models": llm.models,
+            "calls_today": llm_provider.quota.calls_today,
+            "daily_limit": llm_provider.quota.daily_limit,
+            "pending": llm.pending,
+            "done": llm.done,
+            "failed": llm.failed,
+            "last_success_at": (datetime.fromtimestamp(llm.last_success_at, tz=UTC)
+                                if llm.last_success_at else None),
+            "last_error": llm.last_error,
+            "paused_until": llm.paused_until,
         },
     }
 

@@ -63,6 +63,7 @@ class FinalAnalysis:
     analysis: NewsAnalysis
     importance: int  # after caps; analysis.importance keeps the model's raw value
     per_symbol: list[SymbolAssessment]  # exactly one entry per tracked tag
+    model: str = ""  # the model that actually answered (the fallback, sometimes)
 
 
 def finalize(analysis: NewsAnalysis, item: NewsItem) -> FinalAnalysis:

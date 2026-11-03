@@ -168,6 +168,23 @@ dc run --rm api python -m src.backfill --days 5
 
 ---
 
+### ข่าว + LLM (Phase 3c)
+
+ใน `curl -s https://api.fuiji-stock.duckdns.org/health`:
+- `news.last_poll_at` = ดึงข่าวจาก Alpaca สำเร็จล่าสุด (ทุก 60 วินาที)
+- `llm.pending / done / failed` = คิวสรุปข่าว · `llm.calls_today / daily_limit` = โควตาของเราเอง
+- `llm.last_error` = error ล่าสุดของ LLM · `llm.paused_until` = worker หยุดรอ (โควตาหมด หรือ key ผิด)
+
+| งาน | วิธี |
+|---|---|
+| ลอง LLM กับข่าวล่าสุด (ไม่เขียนฐานข้อมูล) | `dc run --rm api python -m src.news.smoke --limit 3` |
+| เปลี่ยนโมเดลหลัก/สำรอง | แก้ `LLM_MODEL` / `LLM_FALLBACK_MODEL` ใน `.env` แล้ว `dc up -d api` |
+| สรุปข่าวใหม่หลังแก้ prompt | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --older-prompt v3` (ใส่เวอร์ชันใหม่ ข่าวที่สรุปด้วยเวอร์ชันนั้นแล้วจะไม่ถูกส่งซ้ำ) |
+| ส่งข่าวที่ failed ไปลองใหม่ | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --status failed` |
+| ปิดการสรุปข่าวชั่วคราว | `LLM_PROVIDER=off` ใน `.env` แล้ว `dc up -d api` (ข่าวยังเข้ามาและแสดงเป็นภาษาอังกฤษ) |
+
+---
+
 ## 3. เหตุฉุกเฉิน
 
 ### Deploy fail
