@@ -46,7 +46,8 @@ class NewsView(BaseModel):
     created_at: datetime
     updated_at: datetime
     backfilled: bool  # loaded at first start: the UI never alerts on these
-    ai_status: str  # pending | done | failed (a re-queued article keeps its old `ai`)
+    ai_status: str  # pending | done | failed | skipped (a re-queued article keeps its old `ai`)
+    skip_reason: str | None  # why the rules kept it from the LLM (ai_status = skipped)
     ai: AIView | None
     per_symbol: list[SymbolView]
     reaction: dict[str, Reaction]  # per tracked symbol
@@ -71,6 +72,7 @@ NEWS_SQL = f"""
       AND ($3::timestamptz IS NULL OR n.created_at < $3)
       AND ($4::int IS NULL OR a.importance >= $4)
       AND ($5 OR a.news_id IS NULL OR coalesce(r.relevance, 0) >= {RELEVANCE_THRESHOLD})
+      AND ($7 OR n.ai_status <> 'skipped')
     ORDER BY n.created_at DESC, n.id DESC
     LIMIT $6
 """
@@ -83,6 +85,7 @@ async def get_news(
     min_importance: int | None = Query(default=None, ge=1, le=5,
                                        description="Articles without AI output are excluded"),
     include_hidden: bool = False,
+    include_skipped: bool = Query(default=False, description="Articles the rules kept from the LLM"),
     since: datetime | None = None,
     before: datetime | None = Query(default=None, description="Exclusive; for paging back"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -95,7 +98,7 @@ async def get_news(
             raise HTTPException(status_code=422, detail=f"Untracked symbol: {symbol!r}")
     wanted = [symbol] if symbol else tracked
     rows = await pool.fetch(NEWS_SQL, since, wanted, before, min_importance, include_hidden,
-                            limit)
+                            limit, include_skipped)
     if not rows:
         return []
 
@@ -117,7 +120,7 @@ async def get_news(
             source=r["source"], url=r["url"],
             symbols=[s for s in r["symbols"] if s in tracked],
             created_at=r["created_at"], updated_at=r["updated_at"], backfilled=r["backfilled"],
-            ai_status=r["ai_status"],
+            ai_status=r["ai_status"], skip_reason=r["skip_reason"],
             ai=AIView(**{k: r[k] for k in AIView.model_fields}) if r["has_ai"] else None,
             per_symbol=per_symbol.get(r["id"], []),
             reaction={s: Reaction(**moves.get((r["id"], s), empty)) for s in shown[r["id"]]},

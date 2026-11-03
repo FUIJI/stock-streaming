@@ -147,3 +147,12 @@ async def test_hidden_depends_on_the_symbol_asked_for(client):
     [shown] = (await c.get("/news", params={"symbol": "AAPL", "include_hidden": "true"})).json()
     assert shown["hidden"] is True
     assert list(shown["reaction"]) == ["AAPL"]
+
+
+async def test_skipped_articles_only_on_request(client):
+    c, pool = client
+    await save_articles(pool, [article(1, T), article(2, T + timedelta(minutes=1))], False)
+    await pool.execute("UPDATE news SET ai_status = 'skipped', skip_reason = 'listicle' WHERE id = 2")
+    assert await ids(c) == [1]
+    resp = await c.get("/news", params={"include_skipped": "true"})
+    assert [(n["id"], n["skip_reason"]) for n in resp.json()] == [(2, "listicle"), (1, None)]

@@ -69,6 +69,7 @@ Alpaca News ─► news (pending)                                   [poller เ�
 ลำดับ: **D1 → D2 → D3** (ชั้น 1 ให้นิ่งก่อน) **→ D4 → D5 → D6** (บทสรุป + UI) **→ D7, D8** · **D10** ทำคู่ขนาน · **D9** รอหุ้น > 10
 
 ### D1 — กฎกรองข่าว + สถานะ `skipped`
+> **เสร็จ** · เพิ่มจาก spec: รูปแบบข่าวอัตโนมัติของ Benzinga (`Price Over Earnings Overview`, `P/E Ratio Insights`, `How Much You Would Have Made`, `If You Invested $`) · ส่งกลับเข้าคิวด้วย `reprocess --rerun-rules` (ใช้กฎใหม่ทั้งสองทาง) แทน `--status skipped` · `reprocess --status all` ไม่แตะข่าว `skipped` · `/news` รับ `include_skipped` แล้ว (ย้ายมาจาก D5)
 - migration `0004` (ตาม Data model) · `src/news/rules.py`: `skip_reason(article) -> str | None`
 - poller ใส่ `skipped` ตั้งแต่ตอนบันทึก · worker ไม่หยิบ `skipped` · `reprocess --status skipped` ส่งกลับเข้าคิวได้ (ถ้ากฎเปลี่ยน)
 - ✅ test regex: หัวข่าวจริงที่ต้องโดน ("Why These 5 Stocks Are on Investors' Radars", "Unusual Options Activity") และที่ต้องไม่โดน (ข่าวงบ, ข่าวดาวน์เกรด) · ข่าวแท็ก 6 หุ้นโดนข้าม
