@@ -43,7 +43,8 @@ def pct(rate: float | None) -> str:
 async def analyze_in_batches(provider, items, names, batch: int) -> AnalyzeResult:
     """Same batch size as the worker sends (LLM_TRIAGE_BATCH), not all cases at once."""
     total = AnalyzeResult()
-    for start in range(0, len(items), batch):
+    for n, start in enumerate(range(0, len(items), batch), 1):
+        print(f"  batch {n}/{-(-len(items) // batch)} ...", file=sys.stderr, flush=True)
         part = await analyze(provider, items[start:start + batch], names)
         total.done.update(part.done)
         total.failed.update(part.failed)

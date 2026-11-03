@@ -7,7 +7,9 @@ from src.news.reprocess import failing_checks, requeue, reset
 from src.news.store import Article, save_articles
 from src.news.worker import process_once
 
-NOW = datetime(2026, 11, 3, 15, 0, tzinfo=UTC)
+# A little ahead of the real clock: rows get now() from Postgres for fetched_at and
+# ai_next_attempt_at, and a fixed date would turn into "the future" as time passes.
+NOW = datetime.now(UTC).replace(microsecond=0) + timedelta(minutes=5)
 
 
 def article(news_id, minutes_ago, symbols=("AAPL",)):

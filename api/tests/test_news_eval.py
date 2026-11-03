@@ -25,17 +25,19 @@ def test_direction_has_a_neutral_band():
 
 def test_scores_count_only_labelled_fields():
     cases = [case(1, 4, {"sentiment": "+", "relevant": True}),
+             case(5, None, {"sentiment": "-", "relevant": False}),  # not scored: incidental
              case(2, 5, {"sentiment": "-", "relevant": None}),
              case(3, None, {"sentiment": None, "relevant": False}),
              case(4, 2)]
-    answers = {1: answer(cases[0], 4), 2: answer(cases[1], 3, sentiment=-0.6),
-               3: answer(cases[2], 3, relevance=0.2, headline_th="ความเสan์")}
+    answers = {1: answer(cases[0], 4), 2: answer(cases[2], 3, sentiment=-0.6),
+               3: answer(cases[3], 3, relevance=0.2, headline_th="ความเสan์"),
+               5: answer(cases[1], 2, relevance=0.2, sentiment=0.5)}
     r = score(cases, answers)
     assert (r.importance_within_1.hits, r.importance_within_1.total) == (1, 2)  # 5 vs 3
     assert r.importance_exact.rate == 0.5
     assert (r.sentiment.hits, r.sentiment.total) == (2, 2)
-    assert (r.relevance.hits, r.relevance.total) == (2, 2)
-    assert (r.headline_th.hits, r.headline_th.total) == (2, 3)  # garbled one dropped
+    assert (r.relevance.hits, r.relevance.total) == (3, 3)
+    assert (r.headline_th.hits, r.headline_th.total) == (3, 4)  # garbled one dropped
     assert r.failed == [4]
     assert len(r.mistakes) == 1 and "importance 3, label 5" in r.mistakes[0]
     assert not r.passed()  # importance ±1 at 50%
@@ -95,3 +97,14 @@ async def test_eval_sends_batches_like_the_worker():
     result = await analyze_in_batches(provider, items, {}, batch=3)
     assert provider.calls == [[1, 2, 3], [4, 5, 6], [7]] and len(result.done) == 7
     assert result.calls == 3
+
+
+def test_the_committed_case_file_is_complete():
+    import json as _json
+    from pathlib import Path
+
+    cases = _json.loads((Path(__file__).parent / "news_eval/cases.json").read_text())["cases"]
+    assert len(cases) == 30 and all(labelled(c) for c in cases)
+    for c in cases:
+        assert set(c["label"]["per_symbol"]) == set(c["tracked"])
+        assert c["label"]["importance"] in {1, 2, 3, 4, 5}
