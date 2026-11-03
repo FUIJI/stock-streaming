@@ -95,6 +95,7 @@ Alpaca News ─► news (pending)                                   [poller เ�
 
 ### D3 — ชุดทดสอบการให้คะแนน (แทน N6)
 > **โค้ดเสร็จ — รอผู้ใช้ติดป้าย** · `export_eval` พิมพ์ออก stdout (container ลบไฟล์หลังรัน) และไม่ใส่คำตอบของ AI ในไฟล์ · `eval --runs N` วัดความสม่ำเสมอข้ามรอบด้วย · คะแนน importance นับหลังกฎ cap · วิธีติดป้ายอยู่ใน `api/tests/news_eval/README.md`
+> ผลรอบแรก (prompt `t1`, 30 ข่าวในชุดเดียว): importance ±1 95% / 90% ✅ · sentiment 76% / 84% · relevance 91% / 79% · ตอบเหมือนเดิมข้ามรอบ 80% / 78% · รอบแรกได้คำตอบแค่ 20/30 · ปัญหาหลัก: ใช้ 0.5 เป็น "ไม่แน่ใจ" (นับเป็นเกี่ยวข้อง), PR ของบริษัทอื่นถูกนับว่าเป็นข่าว NVDA, ให้ +0.5 กับข่าวกลาง ๆ → prompt `t2` ใส่ตัวอย่างระดับคะแนน · eval ส่งชุดตาม `LLM_TRIAGE_BATCH` และพิมพ์สาเหตุที่ล้มเหลว
 - `python -m src.news.export_eval --limit 30` → `api/tests/news_eval/cases.json` · ผู้ใช้ติดป้าย importance, sentiment (บวก/ลบ/กลาง), relevance (≥ 0.5 หรือไม่)
 - `python -m src.news.eval`: importance ต่างไม่เกิน ±1, ทิศ sentiment ตรง, relevance ตรง, `headline_th` ผ่านตัวตรวจ · รายงานเป็น % และรายการที่ผิด
 - ไม่รันใน CI · ✅ เกณฑ์ผ่านก่อนไป D4: importance ±1 ≥ 85%, sentiment ≥ 80%

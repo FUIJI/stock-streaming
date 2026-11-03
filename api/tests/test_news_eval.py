@@ -71,3 +71,27 @@ def test_export_spreads_over_model_scores_and_hides_them():
     assert exported["tracked"] == ["AAPL"] and "importance" not in {k for k in exported
                                                                     if k != "label"}
     assert exported["label"]["per_symbol"] == {"AAPL": {"sentiment": None, "relevant": None}}
+
+
+async def test_eval_sends_batches_like_the_worker():
+    import json as _json
+
+    from src.news.eval import analyze_in_batches
+
+    class Echo:
+        model, calls = "gemma", []
+
+        async def generate_json(self, system, user, schema, max_tokens=None):
+            ids = [a["id"] for a in _json.loads(user)["articles"]]
+            self.calls.append(ids)
+            return _json.dumps({"items": [
+                {"id": i, "headline_th": "ห", "category": "other", "importance": 3,
+                 "is_market_wide": False,
+                 "per_symbol": [{"symbol": "AAPL", "relevance": 1, "sentiment": 0}]}
+                for i in ids]})
+
+    provider = Echo()
+    items = [to_item(case(i)) for i in range(1, 8)]
+    result = await analyze_in_batches(provider, items, {}, batch=3)
+    assert provider.calls == [[1, 2, 3], [4, 5, 6], [7]] and len(result.done) == 7
+    assert result.calls == 3

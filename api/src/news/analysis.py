@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-PROMPT_VERSION = "t1"
+PROMPT_VERSION = "t2"
 
 Category = Literal[
     "earnings", "guidance", "analyst", "product", "legal_regulatory", "m_and_a",
