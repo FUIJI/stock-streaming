@@ -164,3 +164,26 @@ def test_prompt_v2_sets_a_length_budget_and_format_rules():
 
     assert "at most 2 short sentences" in SYSTEM_PROMPT
     assert "No markdown, no code fences" in SYSTEM_PROMPT
+
+
+async def test_filtered_answers_are_bad_output_not_an_outage():
+    from src.news.managed import ManagedProvider, Quota
+
+    withheld = httpx.Response(200, json={"candidates": [
+        {"finishReason": "RECITATION", "content": {}, "finishMessage": "may contain material"}]})
+    gemma, flash = FakeGemini(withheld), FakeGemini(gemini_reply({"items": []}))
+    managed = ManagedProvider(
+        [GeminiProvider("k", "gemma-4-26b-a4b-it", transport=httpx.MockTransport(gemma.handler)),
+         GeminiProvider("k", "gemini-3.8-flash", transport=httpx.MockTransport(flash.handler))],
+        Quota(daily_limit=100, per_minute=100))
+    result = await analyze(managed, ITEMS[:1], NAMES)
+    error = result.failed[1]
+    assert "RECITATION" in str(error) and error.bad_output and error.retryable
+    assert flash.requests == []  # the 20-a-day fallback is not spent on it
+
+
+def test_prompt_v3_asks_for_own_words():
+    from src.news.analysis import PROMPT_VERSION
+    from src.news.prompt import SYSTEM_PROMPT
+
+    assert PROMPT_VERSION == "v3" and "never copy sentences" in SYSTEM_PROMPT

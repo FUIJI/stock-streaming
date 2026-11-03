@@ -7,6 +7,9 @@ from typing import Protocol
 import httpx
 
 GEMINI_URL = "https://generativelanguage.googleapis.com"
+# The model answered but the text was withheld (e.g. RECITATION: too close to the source
+# article). Another model would hit the same filter, so this is bad output, not an outage.
+FILTERED_FINISH_REASONS = {"RECITATION", "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII"}
 
 
 class LLMError(RuntimeError):
@@ -74,7 +77,11 @@ class GeminiProvider:
                            retryable=resp.status_code == 429 or resp.status_code >= 500)
         try:
             candidate = resp.json()["candidates"][0]
-            if candidate.get("finishReason") == "MAX_TOKENS":
+            reason = candidate.get("finishReason")
+            if reason in FILTERED_FINISH_REASONS:
+                raise LLMError(f"Gemini withheld the answer ({reason})", retryable=True,
+                               bad_output=True)
+            if reason == "MAX_TOKENS":
                 # Cut off mid-answer (often a model repeating itself): a smaller batch may fit.
                 raise LLMError("Gemini hit the output token limit", retryable=True,
                                bad_output=True)
