@@ -94,12 +94,17 @@ Index: `news(created_at DESC)`, `news_symbols(symbol)`, `news(ai_status, ai_next
 - คำนวณตอน query: ราคาอ้างอิง = close ของแท่ง 1 นาทีล่าสุด ณ เวลาข่าวออก · เทียบกับ close หลัง 5 และ 30 นาที
 - ถ้ายังไม่มีแท่งหลังข่าว (ตลาดปิด หรือยังไม่ถึงเวลา) → `null`
 - ✅ ทดสอบกับ Postgres จริง: ข่าวระหว่างตลาดเปิด, ข่าวตอนตลาดปิด, ข่าวที่ยังไม่ครบ 30 นาที
+- ที่ทำจริง (`src/news/reaction.py`): ราคาอ้างอิง = close ของแท่งสุดท้ายที่**จบก่อน**นาทีที่ข่าวออก ·
+  หลัง k นาที = close ของแท่งสุดท้ายในช่วง [นาทีที่ข่าวออก, +k) · ต้องรอให้ครบ k นาทีก่อน จึงไม่รายงานแท่งที่ยังวิ่งอยู่
 
 ### N5 — API
 - `GET /news?symbol=&min_importance=&include_hidden=false&since=&before=&limit=50`
   แต่ละรายการมีข้อมูลข่าว + ผลจาก AI (หรือ `null`) + `per_symbol` + `reaction{m5, m30}` + `backfilled`
 - ข่าวที่ซ่อน = relevance สูงสุดของหุ้นที่ติดตาม < 0.5 · ใช้ rate limit เดิม · รับเฉพาะหุ้นที่ติดตาม
 - ✅ ตัวกรองถูกต้อง · ข่าวที่ยังไม่ผ่าน LLM ก็คืนค่าได้
+- ที่ทำจริง (`src/routers/news.py`): `reaction` เป็น `{symbol: {m5, m30}}` ของหุ้นที่ติดตามในข่าว (ถ้าระบุ `symbol` มีแค่ตัวนั้น) ·
+  ถ้าระบุ `symbol` ข่าวที่ซ่อน = relevance **ของหุ้นตัวนั้น** < 0.5 (ข่าว MSFT ที่พูดถึง AAPL ผ่าน ๆ ไม่ขึ้นในแผง AAPL) ·
+  ทุกรายการมี `hidden` และ `ai_status` · `min_importance` ตัดข่าวที่ยังไม่ผ่าน LLM ออก · `limit` สูงสุด 200
 
 ### N6 — ชุดทดสอบคุณภาพ (eval)
 - `python -m src.news.export_eval --limit 20` ดึงข่าวจริงจากฐานข้อมูลเป็น `api/tests/news_eval/cases.json` · ผู้ใช้ติดป้ายคำตอบ
