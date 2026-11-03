@@ -14,12 +14,25 @@ FILTERED_FINISH_REASONS = {"RECITATION", "SAFETY", "PROHIBITED_CONTENT", "BLOCKL
 
 class LLMError(RuntimeError):
     """retryable: worth trying again later. bad_output: the call worked but the answer
-    was unusable, so a smaller batch may succeed where this one failed."""
+    was unusable, so a smaller batch may succeed where this one failed. rate_limited: a
+    429, our key is over a per-minute/per-day limit (waiting fixes it, another model
+    usually doesn't)."""
 
-    def __init__(self, message: str, retryable: bool, bad_output: bool = False):
+    def __init__(self, message: str, retryable: bool, bad_output: bool = False,
+                 rate_limited: bool = False):
         super().__init__(message)
         self.retryable = retryable
         self.bad_output = bad_output
+        self.rate_limited = rate_limited
+
+
+def _error_message(resp: httpx.Response) -> str:
+    """Google's one-line error message instead of a multi-line JSON dump."""
+    try:
+        message = resp.json()["error"]["message"]
+    except (ValueError, KeyError, TypeError):
+        message = resp.text
+    return " ".join(str(message).split())[:300]
 
 
 class LLMProvider(Protocol):
@@ -74,8 +87,9 @@ class GeminiProvider:
                 f"Gemini request failed after {time.monotonic() - started:.0f}s: "
                 f"{type(exc).__name__} {exc}".rstrip(), retryable=True) from exc
         if resp.status_code >= 400:
-            raise LLMError(f"Gemini {resp.status_code}: {resp.text[:300]}",
-                           retryable=resp.status_code == 429 or resp.status_code >= 500)
+            raise LLMError(f"Gemini {resp.status_code}: {_error_message(resp)}",
+                           retryable=resp.status_code == 429 or resp.status_code >= 500,
+                           rate_limited=resp.status_code == 429)
         try:
             self.last_usage = resp.json().get("usageMetadata") or {}
             candidate = resp.json()["candidates"][0]

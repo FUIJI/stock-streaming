@@ -48,5 +48,7 @@ docker compose -f docker-compose.prod.yml -f deploy/compose.vm.yml run --rm -T a
   python -m src.news.eval --runs 2 < ~/cases.json
 ```
 - ใช้ประมาณ 2 call ต่อรอบ (ชุดละ `LLM_TRIAGE_BATCH` ข่าว) · `--runs 2` รัน 2 รอบเพื่อดูว่า AI ตอบเหมือนเดิมไหม
+- วัดเฉพาะโมเดลหลัก (Gemma) และเว้น 1 นาทีต่อ call (`--rpm 1`) เพราะ API ที่รันอยู่ใช้ key เดียวกัน และ Gemma ฟรีได้แค่ 16K token/นาที · ใส่ `--with-fallback` ถ้าอยากรวม Flash (โควตา 20 ครั้ง/วัน)
+- เจอ `! N articles: Gemini 429` = ชนเพดานต่อนาทีของ Google · รอ 1–2 นาทีแล้วรันใหม่ · อย่ารัน eval หลายตัวพร้อมกัน
 - **เกณฑ์ผ่านก่อนไป D4:** importance ต่างไม่เกิน ±1 อย่างน้อย 85% และทิศของ sentiment ตรงอย่างน้อย 80%
 - รายการ `✗` คือข้อที่ AI ตอบไม่ตรงกับป้าย บางข้ออาจเป็นป้ายที่ควรแก้ ไม่ได้แปลว่า AI ผิดเสมอ

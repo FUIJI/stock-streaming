@@ -177,3 +177,12 @@ async def test_triage_keeps_the_phase_3c_summary(pg_pool):
     await run(pg_pool, managed(answer(1, importance=2)))
     ai = await pg_pool.fetchrow("SELECT * FROM news_ai WHERE news_id = 1")
     assert (ai["summary_th"], ai["headline_th"], ai["importance"]) == ("สรุปเดิม", "หัวข่าว 1", 2)
+
+
+async def test_rate_limits_pause_the_worker_without_spending_attempts(pg_pool):
+    await migrate(pg_pool)
+    await save_articles(pg_pool, [article(1, 5)], False)
+    limited = LLMError("Gemini 429: quota", retryable=True, rate_limited=True)
+    outcome = await run(pg_pool, managed(limited))
+    assert outcome.pause_until == NOW + timedelta(minutes=1)
+    assert (await status(pg_pool, 1))["ai_attempts"] == 0

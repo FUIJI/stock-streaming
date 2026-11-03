@@ -230,3 +230,11 @@ def test_prompt_version_is_triage():
     from src.news.analysis import PROMPT_VERSION
 
     assert PROMPT_VERSION == "t3"
+
+
+async def test_429_is_rate_limited_with_a_one_line_message():
+    body = {"error": {"code": 429, "message": "You exceeded your current quota,\n* Quota x"}}
+    result = await analyze(FakeGemini(httpx.Response(429, json=body)).provider(), ITEMS, NAMES)
+    error = result.failed[1]
+    assert error.rate_limited and error.retryable and "\n" not in str(error)
+    assert str(error) == "Gemini 429: You exceeded your current quota, * Quota x"
