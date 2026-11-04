@@ -102,3 +102,20 @@ export function formatCardTime(iso: string): string {
     hourCycle: "h23",
   }).format(new Date(iso));
 }
+
+export interface Accuracy {
+  evaluated: number;
+  hits: number;
+  rate: number | null;
+  baseline_rate: number | null; // API from D11 on; older APIs leave it out
+}
+
+export const MIN_JUDGED = 20; // D-Q16: below this the percentage is mostly noise
+
+/** "Past outlooks: 58% right (naive guess 51%) · 34 judged", or null while too few. */
+export function accuracyLine(acc: Accuracy | null): string | null {
+  if (!acc || acc.rate == null || acc.evaluated < MIN_JUDGED) return null;
+  const pct = (r: number) => `${Math.round(r * 100)}%`;
+  const baseline = acc.baseline_rate == null ? "" : ` (naive guess ${pct(acc.baseline_rate)})`;
+  return `Past outlooks: ${pct(acc.rate)} right${baseline} · ${acc.evaluated} judged`;
+}
