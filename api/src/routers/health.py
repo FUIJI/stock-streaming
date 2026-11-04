@@ -47,6 +47,7 @@ async def health(request: Request) -> dict:
             "failed": llm.failed,
             "skipped": llm.skipped,
             "outlooks_queued": llm.outlooks_queued,
+            "calls_since_start": {"triage": llm.triage_calls, "outlook": llm.digest_calls},
             "last_success_at": (datetime.fromtimestamp(llm.last_success_at, tz=UTC)
                                 if llm.last_success_at else None),
             # Read live from the provider: a round can take minutes (slow model + fallback).

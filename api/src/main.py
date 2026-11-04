@@ -20,7 +20,7 @@ from .news.poller import NewsStats, run_poller
 from .news.worker import LLMStats, run_worker
 from .quotes import SnapshotCache
 from .symbols import register_symbols
-from .routers import candles, health, market, news, quotes, stream
+from .routers import candles, digest, health, market, news, quotes, stream
 from .routers.stream import TradeBroadcaster, consume_trades
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -105,6 +105,7 @@ app.add_middleware(
 )
 
 app.include_router(candles.router)
+app.include_router(digest.router)
 app.include_router(health.router)
 app.include_router(market.router)
 app.include_router(news.router)

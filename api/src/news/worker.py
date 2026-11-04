@@ -42,6 +42,8 @@ class LLMStats:
     last_error: str | None = None
     paused_until: datetime | None = None
     outlooks_queued: int = 0  # outlook cards waiting to be written (digest_jobs)
+    triage_calls: int = 0  # LLM calls since the API started, by kind
+    digest_calls: int = 0
 
 
 @dataclass
@@ -176,13 +178,17 @@ async def run_worker(pool: asyncpg.Pool, provider: ManagedProvider, tracked: set
                     log.info("Outlook round %s: %s", due.isoformat(), ", ".join(queued))
                 last_round = due
 
+            before = provider.quota.calls_today
             if provider.quota.remaining() > reserve:
                 outcome = await process_once(pool, provider, tracked, names, batch_size,
                                              PROMPT_VERSION, batch_wait=batch_wait)
             else:
                 outcome = Outcome(processed=0)  # what's left today is for outlook cards
+            stats.triage_calls += max(0, provider.quota.calls_today - before)
             if not outcome.processed and not outcome.pause_until:
+                before = provider.quota.calls_today
                 card = await process_digest_once(pool, provider, names)
+                stats.digest_calls += max(0, provider.quota.calls_today - before)
                 outcome = Outcome(processed=card.processed, pause_until=card.pause_until)
 
             stats.last_error = provider.last_error
