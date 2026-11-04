@@ -209,7 +209,7 @@ async def write_outlook(provider: LLMProvider, inputs: Inputs,
                         company: str) -> tuple[Outlook, str]:
     raw = await provider.generate_json(
         SYSTEM_PROMPT, build_user_message(inputs, company), RESPONSE_SCHEMA,
-        max_tokens=int(os.environ.get("LLM_DIGEST_MAX_TOKENS", "2048")))
+        max_tokens=int(os.environ.get("LLM_DIGEST_MAX_TOKENS", "4096")))  # Thai is token-heavy
     model = getattr(provider, "last_model", None) or provider.model
     return parse(raw, inputs), model
 
