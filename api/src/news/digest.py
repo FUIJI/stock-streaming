@@ -241,6 +241,26 @@ async def save(pool: asyncpg.Pool, inputs: Inputs, card: Outlook, model: str) ->
 
 # --- CLI ---------------------------------------------------------------------------
 
+CLI_WAITS = (30.0, 90.0)  # Gemma's free tier answers 503 "high demand" in bursts
+
+
+async def write_with_retries(provider: LLMProvider, inputs: Inputs, company: str,
+                             waits=CLI_WAITS, sleep=None) -> tuple[Outlook, str]:
+    """write_outlook, waiting and trying again while the service is unavailable."""
+    import asyncio
+    import sys
+
+    sleep = sleep or asyncio.sleep
+    for wait in (*waits, None):
+        try:
+            return await write_outlook(provider, inputs, company)
+        except LLMError as exc:
+            if wait is None or exc.bad_output or not exc.retryable:
+                raise
+            print(f"  {exc} · trying again in {wait:.0f}s", file=sys.stderr, flush=True)
+            await sleep(wait)
+    raise AssertionError("unreachable")
+
 async def _cli(symbol: str, dry_run: bool) -> None:
     from datetime import UTC
 
@@ -263,8 +283,11 @@ async def _cli(symbol: str, dry_run: bool) -> None:
                   f"{a['headline'][:80]}")
         if not inputs.articles:
             return
-        card, model = await write_outlook(provider, inputs,
-                                          (await company_names(pool)).get(symbol, symbol))
+        company = (await company_names(pool)).get(symbol, symbol)
+        try:
+            card, model = await write_with_retries(provider, inputs, company)
+        except LLMError as exc:
+            raise SystemExit(f"No card: {exc}") from None
         print(json.dumps({"model": model, **card.model_dump()}, ensure_ascii=False, indent=2))
         if not dry_run:
             print("saved as news_digest", await save(pool, inputs, card, model))
