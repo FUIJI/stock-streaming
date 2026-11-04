@@ -105,3 +105,15 @@ async def test_rate_limits_do_not_burn_the_fallbacks_daily_quota():
     with pytest.raises(LLMError) as raised:
         await managed.generate_json("s", "u", {})
     assert raised.value.rate_limited and fallback.calls == 0
+
+
+def test_remaining_resets_on_a_new_day_without_a_call():
+    from datetime import timedelta
+
+    day = [datetime(2026, 11, 3, 23, 0, tzinfo=UTC)]
+    quota = Quota(daily_limit=10, per_minute=5, clock=lambda: day[0])
+    quota._roll(day[0])
+    quota.calls_today = 10
+    assert quota.remaining() == 0
+    day[0] += timedelta(hours=2)
+    assert quota.remaining() == 10

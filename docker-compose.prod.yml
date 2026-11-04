@@ -78,6 +78,10 @@ services:
       LLM_TRIAGE_BATCH: ${LLM_TRIAGE_BATCH:-25}
       LLM_TRIAGE_WAIT_SEC: ${LLM_TRIAGE_WAIT_SEC:-45}
       LLM_DAILY_CALL_LIMIT: ${LLM_DAILY_CALL_LIMIT:-200}
+      # Outlook cards (D4): rounds in New York time; triage stops this many calls short
+      # of the daily cap so the cards can still be written.
+      DIGEST_TIMES_ET: ${DIGEST_TIMES_ET:-08:45,12:30,16:30}
+      LLM_DIGEST_RESERVE: ${LLM_DIGEST_RESERVE:-60}
       # A full batch is ~5.5K tokens and Gemma's free tier allows 16K tokens/minute.
       LLM_RPM_LIMIT: ${LLM_RPM_LIMIT:-2}
       # Measured on the VM: Gemma loops at the default (~1.0) and at 0; 0.2 was clean.

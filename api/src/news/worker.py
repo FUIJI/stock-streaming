@@ -15,6 +15,7 @@ import asyncpg
 
 from .analysis import PROMPT_VERSION, FinalAnalysis
 from .analyzer import analyze
+from .digest_jobs import enqueue_round, latest_round, process_digest_once, round_times
 from .llm import LLMError
 from .managed import ManagedProvider, QuotaExhausted
 from .store import company_names, to_item
@@ -40,6 +41,7 @@ class LLMStats:
     last_success_at: float | None = None
     last_error: str | None = None
     paused_until: datetime | None = None
+    outlooks_queued: int = 0  # outlook cards waiting to be written (digest_jobs)
 
 
 @dataclass
@@ -157,16 +159,38 @@ async def run_worker(pool: asyncpg.Pool, provider: ManagedProvider, tracked: set
         await refresh_counts(pool, stats)  # /health shows the real backlog from the start
     except Exception:
         log.exception("Could not count the news queue")
+    times = round_times()
+    # Calls kept for outlook cards: triage stops this short of the daily cap (D-Q10).
+    reserve = min(int(os.environ.get("LLM_DIGEST_RESERVE", "60")),
+                  provider.quota.daily_limit // 2)  # a low daily cap still triages
+    last_round: datetime | None = None
     while True:
         try:
             if time.monotonic() - names_at > 3600:
                 names, names_at = await company_names(pool), time.monotonic()
-            outcome = await process_once(pool, provider, tracked, names, batch_size,
-                                         PROMPT_VERSION, batch_wait=batch_wait)
+            now = datetime.now(UTC)
+            due = latest_round(now, times)
+            if due != last_round:
+                queued = await enqueue_round(pool, sorted(tracked), due)
+                if queued:
+                    log.info("Outlook round %s: %s", due.isoformat(), ", ".join(queued))
+                last_round = due
+
+            if provider.quota.remaining() > reserve:
+                outcome = await process_once(pool, provider, tracked, names, batch_size,
+                                             PROMPT_VERSION, batch_wait=batch_wait)
+            else:
+                outcome = Outcome(processed=0)  # what's left today is for outlook cards
+            if not outcome.processed and not outcome.pause_until:
+                card = await process_digest_once(pool, provider, names)
+                outcome = Outcome(processed=card.processed, pause_until=card.pause_until)
+
             stats.last_error = provider.last_error
             if outcome.done:
                 stats.last_success_at = time.time()
             await refresh_counts(pool, stats)
+            stats.outlooks_queued = await pool.fetchval(
+                "SELECT count(*) FROM digest_jobs WHERE status = 'pending'")
             stats.paused_until = outcome.pause_until
             if outcome.pause_until:
                 await asyncio.sleep(max(0.0, (outcome.pause_until - datetime.now(UTC))

@@ -40,10 +40,18 @@ class Quota:
     _day: str = ""
     _recent: deque = field(default_factory=deque)
 
-    async def acquire(self) -> None:
-        now = self.clock()
+    def _roll(self, now: datetime) -> None:
         if now.date().isoformat() != self._day:
             self._day, self.calls_today = now.date().isoformat(), 0
+
+    def remaining(self) -> int:
+        """Calls left today (the count resets at UTC midnight even with no call made)."""
+        self._roll(self.clock())
+        return self.daily_limit - self.calls_today
+
+    async def acquire(self) -> None:
+        now = self.clock()
+        self._roll(now)
         if self.calls_today >= self.daily_limit:
             raise QuotaExhausted(next_utc_midnight(now))
         while True:
