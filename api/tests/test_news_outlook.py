@@ -6,7 +6,15 @@ from datetime import UTC, datetime, time, timedelta
 import pytest
 
 from src.migrate import migrate
-from src.news.digest import count_tones, gather, latest_ids, parse, save
+from src.news.digest import (
+    Outlook,
+    accept_translations,
+    count_tones,
+    gather,
+    latest_ids,
+    parse,
+    save,
+)
 from src.news.digest_jobs import enqueue_round, latest_round, process_digest_once
 from src.news.llm import LLMError
 from src.news.managed import ManagedProvider, Quota
@@ -31,9 +39,18 @@ async def article(pool, news_id, hours_ago, importance=4, relevance=0.9, sentime
 
 
 def card(*ids, outlook="positive", **extra):
-    return json.dumps({"title_th": "ข่าวดีหนุนราคา", "summary_th": "แรงซื้อเพิ่มจากข่าวดี",
-                       "bull": [{"text": "โบรกปรับเป้าขึ้น", "news_ids": list(ids)}], "bear": [],
-                       "outlook": outlook, "confidence": "medium", **extra})
+    """Call 1 of d2: the English card."""
+    return json.dumps({"title": "Good news lifts the stock", "summary": "Buying pressure grew.",
+                       "bull": [{"text": "Broker raised its target", "news_ids": list(ids)}],
+                       "bear": [], "outlook": outlook, "confidence": "medium", **extra})
+
+
+def thai(**lines):
+    """Call 2 of d2: the translation."""
+    lines = lines or {"title": "ข่าวดีหนุนราคา", "summary": "แรงซื้อเพิ่มขึ้น",
+                      "bull0": "โบรกปรับเป้าขึ้น"}
+    return json.dumps({"lines": [{"key": k, "th": v} for k, v in lines.items()]},
+                      ensure_ascii=False)
 
 
 class Scripted:
@@ -105,8 +122,8 @@ def test_a_valid_card_is_accepted():
 @pytest.mark.parametrize("raw", [
     card(1, 99),                                   # cites an article we never sent
     card(1, outlook="up"),                         # not one of the 3 levels
-    card(1, summary_th="แรงซื้อ" + "ๆ" * 400),         # too long
-    card(1, title_th="ความเสan์เสีย"),               # garbled Thai
+    card(1, summary="Buying " * 80),                # too long (and a loop)
+    card(1, title="AI AI AI AI AI AI"),              # degenerate
     card(1, bear=[{"text": "x", "news_ids": []}]),  # a factor without a source
     "{not json",
 ])
@@ -134,7 +151,7 @@ async def test_a_round_queues_only_symbols_whose_news_changed(pg_pool):
     assert await enqueue_round(pg_pool, ["NVDA", "AAPL"], NOW) == ["NVDA"]  # AAPL: no news
     assert await enqueue_round(pg_pool, ["NVDA"], NOW) == []  # same round twice: one job
 
-    await process_digest_once(pg_pool, managed(card(1)), {}, now=NOW)
+    await process_digest_once(pg_pool, managed(card(1), thai()), {}, now=NOW)
     assert await latest_ids(pg_pool, "NVDA") == [1]
     later = NOW + timedelta(hours=4)
     assert await enqueue_round(pg_pool, ["NVDA"], later) == []  # nothing new: no card, no call
@@ -147,15 +164,23 @@ async def test_a_card_is_written_and_stored(pg_pool):
     await article(pg_pool, 1, hours_ago=3, sentiment=0.7)
     await article(pg_pool, 2, hours_ago=2, sentiment=-0.7)
     await enqueue_round(pg_pool, ["NVDA"], NOW)
-    reply = card(1, bear=[{"text": "ต้นทุนเพิ่ม", "news_ids": [2]}], outlook="mixed")
-    assert (await process_digest_once(pg_pool, managed(reply), {}, now=NOW)).processed == 1
+    reply = card(1, bear=[{"text": "Costs are rising", "news_ids": [2]}], outlook="mixed")
+    translation = thai(title="ข่าวผสม", summary="แรงซื้อและแรงขายพอ ๆ กัน",
+                       bull0="โบรกปรับเป้าขึ้น", bear0="ความเสan์ต้นทุน")  # bear0 garbled
+    outcome = await process_digest_once(pg_pool, managed(reply, translation), {}, now=NOW)
+    assert outcome.processed == 1
 
     row = await pg_pool.fetchrow("SELECT * FROM news_digest")
     assert (row["symbol"], row["tone"], row["confidence"], row["prompt_version"]) == (
-        "NVDA", "mixed", "medium", "d1")
+        "NVDA", "mixed", "medium", "d2")
     assert sorted(row["news_ids"]) == [1, 2]
     assert json.loads(row["counts"]) == {"positive": 1, "negative": 1, "neutral": 0}
-    assert [b["side"] for b in json.loads(row["bullets"])] == ["bull", "bear"]
+    bullets = json.loads(row["bullets"])
+    assert [b["side"] for b in bullets] == ["bull", "bear"]
+    assert bullets[0]["text"] == "โบรกปรับเป้าขึ้น"
+    assert bullets[1]["text"] == "Costs are rising"  # garbled Thai -> the English stays
+    assert (row["title_th"], row["title_en"]) == ("ข่าวผสม", "Good news lifts the stock")
+    assert row["prompt_version"] == "d2"
     assert await pg_pool.fetchval("SELECT status FROM digest_jobs") == "done"
 
 
@@ -180,7 +205,7 @@ async def test_a_job_whose_news_did_not_change_is_skipped_without_a_call(pg_pool
     await migrate(pg_pool)
     await article(pg_pool, 1, hours_ago=3)
     inputs = await gather(pg_pool, "NVDA", NOW)
-    await save(pg_pool, inputs, parse(card(1), inputs), "gemma")  # e.g. written by the CLI
+    await save(pg_pool, inputs, Outlook(draft=parse(card(1), inputs), th={}), "gemma")  # CLI
     await pg_pool.execute(
         "INSERT INTO digest_jobs (scope, symbol, due_at) VALUES ('symbol', 'NVDA', $1)", NOW)
     await process_digest_once(pg_pool, managed(), {}, now=NOW)  # no script: must not call
@@ -199,10 +224,41 @@ async def test_the_cli_waits_out_an_unavailable_service():
     inputs = _Inputs()
     inputs.articles, inputs.symbol, inputs.counts = [], "NVDA", {}
     inputs.price_change_pct, inputs.reaction_m30 = None, {}
-    got, model = await write_with_retries(managed(busy, card(1)), inputs, "NVIDIA",
+    got, model = await write_with_retries(managed(busy, card(1), thai()), inputs, "NVIDIA",
                                           waits=(30, 90), sleep=fake_sleep)
-    assert got.outlook == "positive" and slept == [30]
+    assert got.outlook == "positive" and got.text("title") == "ข่าวดีหนุนราคา"
+    assert slept == [30]
 
     with pytest.raises(LLMError):  # still down after every wait: reported, not looped
         await write_with_retries(managed(busy, busy, busy), inputs, "NVIDIA",
                                  waits=(30, 90), sleep=fake_sleep)
+
+
+def test_translations_are_checked_line_by_line():
+    draft = parse(card(1, bear=[{"text": "Costs up", "news_ids": [2]}]), _Inputs())
+    ok = accept_translations(thai(title="หัวข้อ", summary="ส" * 451, bull0="ข้อดี",
+                                  bear0="โอกาสโอกาสโอกาสโอกาสโอกาส", extra="ไม่ได้ขอ"), draft)
+    assert ok == {"title": "หัวข้อ", "bull0": "ข้อดี"}  # too long, looped, unknown key: out
+    assert accept_translations("{not json", draft) == {}
+
+
+async def test_a_looping_translation_leaves_the_card_in_english():
+    from src.news.digest import write_outlook
+
+    looped = LLMError("Gemini hit the output token limit", retryable=True, bad_output=True)
+    inputs = _Inputs()
+    inputs.articles, inputs.symbol, inputs.counts = [], "NVDA", {}
+    inputs.price_change_pct, inputs.reaction_m30 = None, {}
+    got, _ = await write_outlook(managed(card(1), looped), inputs, "NVIDIA")
+    assert got.text("title") == "Good news lifts the stock" and got.th == {}
+
+
+async def test_an_unavailable_translator_retries_the_whole_card_later():
+    from src.news.digest import write_outlook
+
+    busy = LLMError("Gemini 503", retryable=True)
+    inputs = _Inputs()
+    inputs.articles, inputs.symbol, inputs.counts = [], "NVDA", {}
+    inputs.price_change_pct, inputs.reaction_m30 = None, {}
+    with pytest.raises(LLMError):
+        await write_outlook(managed(card(1), busy), inputs, "NVIDIA")
