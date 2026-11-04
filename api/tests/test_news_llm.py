@@ -238,3 +238,16 @@ async def test_429_is_rate_limited_with_a_one_line_message():
     error = result.failed[1]
     assert error.rate_limited and error.retryable and "\n" not in str(error)
     assert str(error) == "Gemini 429: You exceeded your current quota, * Quota x"
+
+
+async def test_429_names_the_limit_that_was_hit():
+    body = {"error": {"code": 429, "message": (
+        "You exceeded your current quota, please check your plan and billing details. "
+        "For more information on this error, head to: https://ai.google.dev/x. To monitor "
+        "your current usage, head to: https://ai.dev/rate-limit. \n* Quota exceeded for "
+        "metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count"
+        ", limit: 16000, model: gemma-4-26b-a4b-it\nPlease retry in 21.4s.")}}
+    result = await analyze(FakeGemini(httpx.Response(429, json=body)).provider(), ITEMS, NAMES)
+    message = str(result.failed[1])
+    assert message.startswith("Gemini 429: quota exceeded: generativelanguage")
+    assert "limit: 16000" in message and "retry in 21.4s" in message

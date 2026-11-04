@@ -32,7 +32,13 @@ def _error_message(resp: httpx.Response) -> str:
         message = resp.json()["error"]["message"]
     except (ValueError, KeyError, TypeError):
         message = resp.text
-    return " ".join(str(message).split())[:300]
+    message = " ".join(str(message).split())
+    # A 429 starts with boilerplate; the useful part is which limit (per minute? per day?
+    # tokens or requests?) was hit and when to retry.
+    marker = "Quota exceeded for metric:"
+    if marker in message:
+        message = "quota exceeded: " + message[message.index(marker) + len(marker):].strip()
+    return message[:300]
 
 
 class LLMProvider(Protocol):
