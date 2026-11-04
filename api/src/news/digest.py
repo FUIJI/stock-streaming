@@ -1,5 +1,10 @@
 """The per-symbol 3-day outlook card (Phase 3d, D4).
 
+d2: two calls. Gemma writes the card in English (it looped writing ~1,000 characters of
+Thai in one go: "...ดีกว่าคาดการณ์-ดี|and ว่าง-..." until the token limit), then translates
+it line by line, each line short like the triage headlines it handles well. A line whose
+translation fails the checks stays in English instead of sinking the card.
+
     python -m src.news.digest --symbol NVDA [--dry-run]
 
 Inputs (D-Q7/D-Q8): up to 10 relevant, important articles from the last 72 hours plus
@@ -23,7 +28,7 @@ from .evaluation import direction
 from .llm import LLMError, LLMProvider
 from .reaction import reactions
 
-PROMPT_VERSION = "d1"
+PROMPT_VERSION = "d2"
 WINDOW = timedelta(hours=72)
 MAX_ARTICLES = 10
 MIN_IMPORTANCE = 3
@@ -104,7 +109,7 @@ def _checked(value: str) -> str:
 
 
 class Point(BaseModel):
-    text: str = Field(min_length=1, max_length=120)
+    text: str = Field(min_length=1, max_length=200)
     news_ids: list[int] = Field(min_length=1)
 
     @field_validator("text")
@@ -113,15 +118,17 @@ class Point(BaseModel):
         return _checked(value)
 
 
-class Outlook(BaseModel):
-    title_th: str = Field(min_length=1, max_length=80)
-    summary_th: str = Field(min_length=1, max_length=300)
+class Draft(BaseModel):
+    """Call 1: the card in English."""
+
+    title: str = Field(min_length=1, max_length=90)
+    summary: str = Field(min_length=1, max_length=420)
     bull: list[Point] = Field(default_factory=list, max_length=3)
     bear: list[Point] = Field(default_factory=list, max_length=3)
     outlook: Literal["positive", "negative", "mixed"]
     confidence: Literal["low", "medium", "high"]
 
-    @field_validator("title_th", "summary_th")
+    @field_validator("title", "summary")
     @classmethod
     def usable(cls, value: str) -> str:
         return _checked(value)
@@ -129,21 +136,64 @@ class Outlook(BaseModel):
     def cited(self) -> set[int]:
         return {i for p in self.bull + self.bear for i in p.news_ids}
 
+    def lines(self) -> dict[str, str]:
+        """Everything to translate, keyed so the answer can be matched back."""
+        out = {"title": self.title, "summary": self.summary}
+        out.update({f"bull{i}": p.text for i, p in enumerate(self.bull)})
+        out.update({f"bear{i}": p.text for i, p in enumerate(self.bear)})
+        return out
 
-SYSTEM_PROMPT = f"""You write a short outlook card for one stock on a dashboard read by Thai
-investors. The input has up to {MAX_ARTICLES} recent articles that matter for the stock
-(already filtered and scored), how many were good / bad / neutral for it, and how much the
-price moved over the same period. Write in Thai; keep tickers, company and product names
-in English. Write in your own words.
+
+# Thai is usually no longer than the English it comes from; anything far longer is runaway.
+TH_LIMITS = {"title": 100, "summary": 450}
+TH_POINT_LIMIT = 220
+
+
+@dataclass
+class Outlook:
+    """The finished card: Thai where the translation passed the checks, English elsewhere."""
+
+    draft: Draft
+    th: dict[str, str]  # key -> Thai line (missing = keep the English)
+
+    def text(self, key: str) -> str:
+        return self.th.get(key) or self.draft.lines()[key]
+
+    @property
+    def outlook(self) -> str:
+        return self.draft.outlook
+
+    @property
+    def confidence(self) -> str:
+        return self.draft.confidence
+
+    def bullets(self) -> list[dict]:
+        return ([{"side": "bull", "text": self.text(f"bull{i}"), "text_en": p.text,
+                  "news_ids": p.news_ids} for i, p in enumerate(self.draft.bull)]
+                + [{"side": "bear", "text": self.text(f"bear{i}"), "text_en": p.text,
+                    "news_ids": p.news_ids} for i, p in enumerate(self.draft.bear)])
+
+    def summary(self) -> dict:
+        return {"title": self.text("title"), "summary": self.text("summary"),
+                "bullets": self.bullets(), "outlook": self.outlook,
+                "confidence": self.confidence,
+                "translated": f"{len(self.th)}/{len(self.draft.lines())}"}
+
+
+SYSTEM_PROMPT = f"""You write a short outlook card for one stock on an investing dashboard.
+The input has up to {MAX_ARTICLES} recent articles that matter for the stock (already
+filtered and scored), how many were good / bad / neutral for it, and how much the price
+moved over the same period. Write plain, concise English in your own words.
 
 Return:
-- title_th: one line (at most 70 characters) with the main theme of the news.
-- summary_th: 2-3 short sentences (at most 280 characters): taken together, does the news
+- title: one line (at most 80 characters) with the main theme of the news.
+- summary: 2-3 short sentences (at most 380 characters): taken together, does the news
   add buying or selling pressure, and has the price already reacted (news good but price
   down may mean it is priced in, or that something else dominates)?
 - bull: up to 3 positive factors, bear: up to 3 negative factors. Each one short line (at
-  most 110 characters) with "news_ids": the ids of the articles it comes from. Every
+  most 150 characters) with "news_ids": the ids of the articles it comes from. Every
   factor must come from the articles; leave a list empty if there is nothing for it.
+  Several articles about the same event are one factor citing all of them.
 - outlook: the likely direction over the next 3 trading days judged ONLY from this news:
   positive, negative, or mixed (balanced, unclear, or mostly priced in).
 - confidence: low, medium or high. Use low when there are few articles, they conflict,
@@ -160,14 +210,30 @@ _POINT = {"type": "OBJECT", "properties": {
 RESPONSE_SCHEMA = {
     "type": "OBJECT",
     "properties": {
-        "title_th": {"type": "STRING"},
-        "summary_th": {"type": "STRING"},
+        "title": {"type": "STRING"},
+        "summary": {"type": "STRING"},
         "bull": {"type": "ARRAY", "items": _POINT},
         "bear": {"type": "ARRAY", "items": _POINT},
         "outlook": {"type": "STRING", "enum": ["positive", "negative", "mixed"]},
         "confidence": {"type": "STRING", "enum": ["low", "medium", "high"]},
     },
-    "required": ["title_th", "summary_th", "bull", "bear", "outlook", "confidence"],
+    "required": ["title", "summary", "bull", "bear", "outlook", "confidence"],
+}
+
+TRANSLATE_PROMPT = """Translate each line of an investing dashboard card into natural,
+concise Thai for Thai retail investors. Keep tickers, company, product and person names in
+English; keep numbers as they are. Translate the meaning in your own words: add nothing,
+drop nothing. Each translation must be about as long as its line, never longer.
+Return {"lines": [{"key": ..., "th": ...}]} with one entry per input line, same keys.
+Output rules: reply with the JSON object only. No markdown, no code fences."""
+
+TRANSLATE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {"lines": {"type": "ARRAY", "items": {
+        "type": "OBJECT",
+        "properties": {"key": {"type": "STRING"}, "th": {"type": "STRING"}},
+        "required": ["key", "th"]}}},
+    "required": ["lines"],
 }
 
 
@@ -191,27 +257,64 @@ def build_user_message(inputs: Inputs, company: str) -> str:
     }, ensure_ascii=False)
 
 
-def parse(raw: str, inputs: Inputs) -> Outlook:
-    """Validated card; LLMError(bad_output) for anything unusable or citing unknown ids."""
+def parse(raw: str, inputs: Inputs) -> Draft:
+    """Validated English card; LLMError(bad_output) if unusable or citing unknown ids."""
     try:
-        card = Outlook.model_validate_json(extract_json(raw))
+        draft = Draft.model_validate_json(extract_json(raw))
     except ValidationError as exc:
         raise LLMError(f"invalid outlook: {str(exc)[:300]}", retryable=True,
                        bad_output=True) from exc
-    unknown = card.cited() - set(inputs.news_ids)
+    unknown = draft.cited() - set(inputs.news_ids)
     if unknown:
         raise LLMError(f"outlook cites articles that were not sent: {sorted(unknown)}",
                        retryable=True, bad_output=True)
-    return card
+    return draft
+
+
+def accept_translations(raw: str, draft: Draft) -> dict[str, str]:
+    """The Thai lines that pass the checks; anything else is simply left out."""
+    try:
+        lines = json.loads(extract_json(raw)).get("lines") or []
+    except (ValueError, AttributeError):
+        return {}
+    wanted = draft.lines()
+    ok: dict[str, str] = {}
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        key, th = line.get("key"), line.get("th")
+        if key not in wanted or not isinstance(th, str) or not th.strip():
+            continue
+        th = th.strip()
+        limit = TH_LIMITS.get(key, TH_POINT_LIMIT)
+        if len(th) <= limit and not degeneration(th):
+            ok[key] = th
+    return ok
+
+
+async def translate(provider: LLMProvider, draft: Draft) -> dict[str, str]:
+    """Thai for each line. A garbled answer costs only the lines it garbled; an
+    unavailable service is raised, so the job is retried later."""
+    lines = [{"key": k, "text": v} for k, v in draft.lines().items()]
+    try:
+        raw = await provider.generate_json(
+            TRANSLATE_PROMPT, json.dumps({"lines": lines}, ensure_ascii=False),
+            TRANSLATE_SCHEMA, max_tokens=int(os.environ.get("LLM_TRANSLATE_MAX_TOKENS", "2048")))
+    except LLMError as exc:
+        if exc.bad_output:
+            return {}  # e.g. looped to the token limit: the card stays in English
+        raise
+    return accept_translations(raw, draft)
 
 
 async def write_outlook(provider: LLMProvider, inputs: Inputs,
                         company: str) -> tuple[Outlook, str]:
     raw = await provider.generate_json(
         SYSTEM_PROMPT, build_user_message(inputs, company), RESPONSE_SCHEMA,
-        max_tokens=int(os.environ.get("LLM_DIGEST_MAX_TOKENS", "4096")))  # Thai is token-heavy
+        max_tokens=int(os.environ.get("LLM_DIGEST_MAX_TOKENS", "2048")))
     model = getattr(provider, "last_model", None) or provider.model
-    return parse(raw, inputs), model
+    draft = parse(raw, inputs)
+    return Outlook(draft=draft, th=await translate(provider, draft)), model
 
 
 # --- storage -------------------------------------------------------------------------
@@ -224,19 +327,18 @@ async def latest_ids(pool: asyncpg.Pool, symbol: str) -> list[int] | None:
 
 
 async def save(pool: asyncpg.Pool, inputs: Inputs, card: Outlook, model: str) -> int:
-    bullets = ([{"side": "bull", **p.model_dump()} for p in card.bull]
-               + [{"side": "bear", **p.model_dump()} for p in card.bear])
     return await pool.fetchval(
         """INSERT INTO news_digest (scope, symbol, period_start, period_end, title_th, bullets,
                                     tone, news_ids, model, prompt_version, summary_th,
-                                    confidence, counts, price_change_pct, price_at_create)
+                                    confidence, counts, price_change_pct, price_at_create,
+                                    title_en, summary_en)
            VALUES ('symbol', $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb,
-                   $13, $14)
+                   $13, $14, $15, $16)
            RETURNING id""",
-        inputs.symbol, inputs.period_start, inputs.period_end, card.title_th,
-        json.dumps(bullets, ensure_ascii=False), card.outlook, inputs.news_ids, model,
-        PROMPT_VERSION, card.summary_th, card.confidence, json.dumps(inputs.counts),
-        inputs.price_change_pct, inputs.price_now)
+        inputs.symbol, inputs.period_start, inputs.period_end, card.text("title"),
+        json.dumps(card.bullets(), ensure_ascii=False), card.outlook, inputs.news_ids, model,
+        PROMPT_VERSION, card.text("summary"), card.confidence, json.dumps(inputs.counts),
+        inputs.price_change_pct, inputs.price_now, card.draft.title, card.draft.summary)
 
 
 # --- CLI ---------------------------------------------------------------------------
@@ -288,7 +390,7 @@ async def _cli(symbol: str, dry_run: bool) -> None:
             card, model = await write_with_retries(provider, inputs, company)
         except LLMError as exc:
             raise SystemExit(f"No card: {exc}") from None
-        print(json.dumps({"model": model, **card.model_dump()}, ensure_ascii=False, indent=2))
+        print(json.dumps({"model": model, **card.summary()}, ensure_ascii=False, indent=2))
         if not dry_run:
             print("saved as news_digest", await save(pool, inputs, card, model))
     finally:
