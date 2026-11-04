@@ -185,3 +185,24 @@ async def test_a_job_whose_news_did_not_change_is_skipped_without_a_call(pg_pool
         "INSERT INTO digest_jobs (scope, symbol, due_at) VALUES ('symbol', 'NVDA', $1)", NOW)
     await process_digest_once(pg_pool, managed(), {}, now=NOW)  # no script: must not call
     assert await pg_pool.fetchval("SELECT status FROM digest_jobs") == "skipped"
+
+
+async def test_the_cli_waits_out_an_unavailable_service():
+    from src.news.digest import write_with_retries
+
+    busy = LLMError("Gemini 503: high demand", retryable=True)
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    inputs = _Inputs()
+    inputs.articles, inputs.symbol, inputs.counts = [], "NVDA", {}
+    inputs.price_change_pct, inputs.reaction_m30 = None, {}
+    got, model = await write_with_retries(managed(busy, card(1)), inputs, "NVIDIA",
+                                          waits=(30, 90), sleep=fake_sleep)
+    assert got.outlook == "positive" and slept == [30]
+
+    with pytest.raises(LLMError):  # still down after every wait: reported, not looped
+        await write_with_retries(managed(busy, busy, busy), inputs, "NVIDIA",
+                                 waits=(30, 90), sleep=fake_sleep)
