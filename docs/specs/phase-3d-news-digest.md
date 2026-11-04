@@ -141,6 +141,7 @@ Alpaca News ─► news (pending)                                   [poller เ�
 - `.env.example` / `deploy/env.vm.example` / `docker-compose.prod.yml`: `LLM_TRIAGE_BATCH`, `LLM_TRIAGE_WAIT_SEC`, `NEWS_MAX_TAGS`, `DIGEST_TIMES_ET`, `LLM_DIGEST_RESERVE`, `GEMINI_API_KEY` ฯลฯ
 
 ### D11 — วัดความแม่นของแนวโน้ม
+> **เสร็จ** · ตัดสินที่ราคาปิดของ session ปกติครั้งที่ 3 ที่ปิด**หลัง**การ์ดถูกเขียน (การ์ดตอน 12:30 วันจันทร์ → ปิดวันพุธ · ตอน 16:30 → วันพฤหัส) ใช้ราคาแท่ง 1 นาทีสุดท้ายก่อนตลาดปิด ไม่นับ after-hours · baseline = ทิศของราคาจาก close 3 session ก่อนการ์ดจนถึงตอนสร้าง ตัดสินด้วยเกณฑ์ ±T เดียวกัน (migration `0007`: `baseline_pct`, `baseline_hit`) · รันหลัง reconcile ทุกคืน + ตอน API เริ่ม · ไม่มีราคาเกิน 14 วัน → เลิกประเมินการ์ดนั้น (ไม่นับ) · `python -m src.news.accuracy` พิมพ์รายงาน รวม / ความมั่นใจ / ทิศ / หุ้น
 - job รายวัน (ต่อจาก reconcile): การ์ดที่ครบ 3 วันทำการ → เติม `outcome_*`, `hit` ตาม D-Q14 · baseline = ทิศของราคา 3 วันก่อนสร้างการ์ด
 - `python -m src.news.accuracy` พิมพ์ตาราง: % ถูก รวม / แยก confidence / แยกหุ้น เทียบ baseline
 - ✅ test กับ Postgres จริง: การ์ดยังไม่ครบ 3 วัน → ไม่ประเมิน · วันหยุดตลาดไม่นับ · เกณฑ์ ±T ทั้งสามแบบ

@@ -121,6 +121,8 @@ class Accuracy(BaseModel):
     evaluated: int  # cards whose 3 trading days are over (D11)
     hits: int
     rate: float | None
+    # "the previous 3 sessions' direction continues", judged on the same cards
+    baseline_rate: float | None
     by_confidence: dict[str, dict[str, float | int | None]]
 
 
@@ -131,12 +133,15 @@ async def get_accuracy(request: Request, symbol: str | None = None,
         symbol = tracked_symbol(request, symbol)
     rows = await pool.fetch(
         """SELECT coalesce(confidence, 'unknown') AS confidence, count(*) AS n,
-                  count(*) FILTER (WHERE hit) AS hits
+                  count(*) FILTER (WHERE hit) AS hits,
+                  count(baseline_hit) AS bn, count(*) FILTER (WHERE baseline_hit) AS bhits
            FROM news_digest
            WHERE scope = 'symbol' AND hit IS NOT NULL AND ($1::text IS NULL OR symbol = $1)
            GROUP BY 1""", symbol)
     total, hits = sum(r["n"] for r in rows), sum(r["hits"] for r in rows)
+    bn, bhits = sum(r["bn"] for r in rows), sum(r["bhits"] for r in rows)
     return Accuracy(
         evaluated=total, hits=hits, rate=round(hits / total, 3) if total else None,
+        baseline_rate=round(bhits / bn, 3) if bn else None,
         by_confidence={r["confidence"]: {"evaluated": r["n"], "hits": r["hits"],
                                          "rate": round(r["hits"] / r["n"], 3)} for r in rows})

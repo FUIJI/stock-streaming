@@ -82,6 +82,8 @@ services:
       # of the daily cap so the cards can still be written.
       DIGEST_TIMES_ET: ${DIGEST_TIMES_ET:-08:45,12:30,16:30}
       LLM_DIGEST_RESERVE: ${LLM_DIGEST_RESERVE:-60}
+      # D11: a 3-session move within ±this % counts as "mixed" when judging outlooks
+      OUTLOOK_FLAT_PCT: ${OUTLOOK_FLAT_PCT:-1.0}
       # A full batch is ~5.5K tokens and Gemma's free tier allows 16K tokens/minute.
       LLM_RPM_LIMIT: ${LLM_RPM_LIMIT:-2}
       # Measured on the VM: Gemma loops at the default (~1.0) and at 0; 0.2 was clean.
