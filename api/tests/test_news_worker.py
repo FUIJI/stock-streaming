@@ -105,7 +105,7 @@ async def test_exhausted_quota_pauses_without_spending_attempts(pg_pool):
     await migrate(pg_pool)
     await save_articles(pg_pool, [article(1, 5)], False)
     outcome = await run(pg_pool, managed(daily=0))
-    assert outcome.pause_until == datetime(2026, 11, 4, tzinfo=UTC)
+    assert outcome.pause_until == datetime.combine(NOW.date() + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
     assert (await status(pg_pool, 1))["ai_attempts"] == 0
 
 

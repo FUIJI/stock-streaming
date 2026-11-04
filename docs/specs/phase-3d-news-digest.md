@@ -102,6 +102,7 @@ Alpaca News ─► news (pending)                                   [poller เ�
 - ไม่รันใน CI · ✅ เกณฑ์ผ่านก่อนไป D4: importance ±1 ≥ 85%, sentiment ≥ 80%
 
 ### D4 — แนวโน้มรายหุ้น (prompt `d1`)
+> **โค้ดเสร็จ — รอลองบน VM** · ที่ตัดสินระหว่างทำ: ตรวจว่าชุดข่าวเปลี่ยนไหมทั้งตอนสร้างงานและตอนเขียนจริง (ข่าวอาจเปลี่ยนระหว่างรอ) · ตัวตั้งเวลาอยู่ใน worker loop เดิม (ไม่เพิ่ม task) และ API เริ่มใหม่ก็ไล่รอบล่าสุดที่พลาดได้ · `LLM_DIGEST_RESERVE` ไม่เกินครึ่งของ `LLM_DAILY_CALL_LIMIT` · 429 / โควตาหมด หยุดรอโดยไม่นับครั้ง
 - migration `0005` · `src/news/digest.py`: เลือกข่าวตาม D-Q7 · ตัวเลขตาม D-Q8 · `Outlook` (Pydantic) ตาม D-Q9 · ตรวจ `news_ids` ⊆ ข่าวที่ส่ง
 - ตัวตั้งเวลาสร้าง `digest_jobs` ตาม `DIGEST_TIMES_ET` เฉพาะหุ้นที่ชุดข่าวเปลี่ยน · worker ทำต่อจากงานให้คะแนน (D-Q10) · retry ตาม D-Q9b
 - `python -m src.news.digest --symbol NVDA [--dry-run]` สั่งทำทันที (ไว้ทดสอบ/ปรับ prompt)
