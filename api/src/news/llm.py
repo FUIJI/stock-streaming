@@ -105,8 +105,16 @@ class GeminiProvider:
                                bad_output=True)
             if reason == "MAX_TOKENS":
                 # Cut off mid-answer (often a model repeating itself): a smaller batch may fit.
-                raise LLMError("Gemini hit the output token limit", retryable=True,
-                               bad_output=True)
+                # Say where the tokens went and how the text ended: a loop or just too long?
+                usage = self.last_usage
+                parts = (candidate.get("content") or {}).get("parts") or []
+                text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+                tail = " ".join(text[-120:].split())
+                raise LLMError(
+                    f"Gemini hit the output token limit (answer "
+                    f"{usage.get('candidatesTokenCount', '?')} + thinking "
+                    f"{usage.get('thoughtsTokenCount', 0)} tokens; ends with: ...{tail})",
+                    retryable=True, bad_output=True)
             parts = candidate["content"]["parts"]
             # Thinking models may return thought parts first; the answer is the rest.
             return "".join(p.get("text", "") for p in parts if not p.get("thought"))

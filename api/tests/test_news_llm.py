@@ -251,3 +251,13 @@ async def test_429_names_the_limit_that_was_hit():
     message = str(result.failed[1])
     assert message.startswith("Gemini 429: quota exceeded: generativelanguage")
     assert "limit: 16000" in message and "retry in 21.4s" in message
+
+
+async def test_token_limit_errors_show_where_the_tokens_went():
+    cut_off = httpx.Response(200, json={
+        "candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [
+            {"text": '{"title_th": "ข่าว", "summary_th": "' + "วนซ้ำ " * 50}]}}],
+        "usageMetadata": {"candidatesTokenCount": 2048, "thoughtsTokenCount": 0}})
+    result = await analyze(FakeGemini(cut_off).provider(), ITEMS[:1], NAMES)
+    message = str(result.failed[1])
+    assert "answer 2048 + thinking 0 tokens" in message and message.endswith("วนซ้ำ)")
