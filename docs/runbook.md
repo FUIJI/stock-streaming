@@ -187,6 +187,7 @@ dc run --rm api python -m src.backfill --days 5
 | วัดคุณภาพการให้คะแนน (หลังแก้ prompt/เปลี่ยนโมเดล) | ดู `api/tests/news_eval/README.md` · `dc run --rm -T api python -m src.news.eval --runs 2 < api/tests/news_eval/cases.json` |
 | การ์ดแนวโน้มรายหุ้น (D4) | เขียนเองทุกรอบ `DIGEST_TIMES_ET` เฉพาะหุ้นที่ข่าวเปลี่ยน · ลองทันที (ไม่บันทึก): `dc run --rm api python -m src.news.digest --symbol NVDA --dry-run` · งานที่ค้าง: `/health` → `llm.outlooks_queued` |
 | ดูการ์ดที่หน้าเว็บจะได้ | `curl -s "https://api.fuiji-stock.duckdns.org/digest?symbol=AAPL" \| python3 -m json.tool` (`card: null` = ยังไม่มีการ์ด · `live` = ตัวเลขตอนนี้) |
+| ความแม่นของการ์ดแนวโน้ม (D11) | `dc run --rm api python -m src.news.accuracy` (ประเมินการ์ดที่ครบ 3 session แล้วพิมพ์ % ถูกเทียบ baseline) · เกณฑ์ทรงตัว `OUTLOOK_FLAT_PCT` (ค่าเริ่มต้น 1.0) |
 | ปิดการสรุปข่าวชั่วคราว | `LLM_PROVIDER=off` ใน `.env` แล้ว `dc up -d api` (ข่าวยังเข้ามาและแสดงเป็นภาษาอังกฤษ) |
 
 ---

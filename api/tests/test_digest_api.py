@@ -76,7 +76,7 @@ async def test_cards_older_than_the_window_are_not_shown(client):
 async def test_accuracy(client):
     c, pool = client
     assert (await c.get("/digest/accuracy")).json() == {
-        "evaluated": 0, "hits": 0, "rate": None, "by_confidence": {}}
+        "evaluated": 0, "hits": 0, "rate": None, "baseline_rate": None, "by_confidence": {}}
     await article(pool, 1, hours_ago=3)
     for hit in (True, True, False):
         card_id = await written(pool, [1])

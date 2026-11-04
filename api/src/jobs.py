@@ -9,7 +9,8 @@ The API also runs jobs by itself (see run_schedule):
 - shortly after startup, gap_fill: missing minutes from the live feed (never
   overwriting), plus daily bars from the history feed;
 - nightly at RECONCILE_AT_UTC, after after-hours trading ends: reconcile with
-  the history feed, so every finished session ends up as SIP data.
+  the history feed, so every finished session ends up as SIP data; then judge the
+  outlook cards whose 3 sessions are over (news/accuracy.py), on the corrected prices.
 """
 
 import argparse
@@ -24,6 +25,7 @@ from .alpaca import AlpacaClient
 from .backfill import backfill_daily, backfill_minutes, history_feed, parse_symbols
 from .db import create_pool
 from .migrate import migrate
+from .news.accuracy import evaluate_outlooks
 from .symbols import sync_symbol_metadata
 
 log = logging.getLogger("api.jobs")
@@ -70,11 +72,13 @@ async def run_schedule(pool: asyncpg.Pool, alpaca: AlpacaClient, symbols: list[s
 
     await asyncio.sleep(float(os.environ.get("RECONCILE_STARTUP_DELAY_SEC", "30")))
     await attempt("Startup gap fill", gap_fill(pool, alpaca, symbols, live_feed))
+    await attempt("Outlook accuracy", evaluate_outlooks(pool, alpaca))
     while True:
         wake = next_run(datetime.now(UTC), at_utc)
         log.info("Next reconcile at %s", wake.isoformat())
         await asyncio.sleep((wake - datetime.now(UTC)).total_seconds())
         await attempt("Nightly reconcile", reconcile(pool, alpaca, symbols, 2, history_feed()))
+        await attempt("Outlook accuracy", evaluate_outlooks(pool, alpaca))
 
 
 async def _cli(days: float, feed: str, symbols: list[str]) -> None:
