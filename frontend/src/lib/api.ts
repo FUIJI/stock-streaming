@@ -1,4 +1,5 @@
 import type { BarSession, ChartInterval } from "./market-time";
+import type { Digest } from "./digest";
 import type { NewsItem } from "./news";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -63,4 +64,8 @@ export const fetchSymbolDetails = () => getJson<SymbolInfo[]>("/symbols/details"
 export function fetchNews(symbol: string, limit = 50): Promise<NewsItem[]> {
   const params = new URLSearchParams({ symbol, include_hidden: "true", limit: String(limit) });
   return getJson(`/news?${params}`);
+}
+
+export function fetchDigest(symbol: string): Promise<Digest> {
+  return getJson(`/digest?${new URLSearchParams({ symbol })}`);
 }

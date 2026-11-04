@@ -317,124 +317,134 @@ body {
   gap: 1.25rem;
 }
 
-/* ---------- news panel ---------- */
-.news-panel {
+/* ---------- news outlook card ---------- */
+.outlook-card {
   display: flex;
   flex-direction: column;
   /* As tall as the chart card beside it: height 0 + min-height 100% keeps the
-     panel from growing the grid row, and the list scrolls inside. */
+     card from growing the grid row, and its body scrolls inside. */
   height: 0;
   min-height: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow);
-  padding: 1rem 0 0.5rem;
   min-width: 0;
 }
 
-.news-header {
+.outlook-header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0 1rem 0.75rem;
+  padding: 1rem 1rem 0.75rem;
   border-bottom: 1px solid var(--border);
 }
 
-.news-header h2 { font-size: 1.125rem; font-weight: 600; }
+.outlook-header h2 { font-size: 1.125rem; font-weight: 600; }
+.outlook-header span { color: var(--muted); font-size: 0.8rem; }
 
-.news-list {
-  list-style: none;
+.outlook-scroll {
+  flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
-  flex: 1;
-}
-
-.news-item {
+  padding: 0.9rem 1rem 0.75rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.8rem 1rem;
-  border-bottom: 1px solid var(--border);
+  gap: 0.9rem;
 }
 
-.news-item[data-hidden] { opacity: 0.65; }
-
-.news-meta {
+.outlook-verdict {
+  --tone: var(--extended);
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.news-importance {
-  --tone: var(--muted);
-  padding: 0.05rem 0.4rem;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
   border: 1px solid var(--tone);
-  border-radius: 999px;
-  color: var(--tone);
-  font-weight: 700;
-  font-family: var(--font-geist-mono), monospace;
+  border-radius: 10px;
 }
 
-.news-importance[data-level="4"] { --tone: var(--extended); }
-.news-importance[data-level="5"] { --tone: var(--down); background: var(--tone); color: var(--on-accent); }
+.outlook-verdict[data-outlook="positive"] { --tone: var(--up); }
+.outlook-verdict[data-outlook="negative"] { --tone: var(--down); }
+.verdict-arrow { color: var(--tone); font-size: 1.5rem; line-height: 1; }
+.outlook-verdict strong { color: var(--tone); font-size: 1.05rem; }
+.outlook-verdict span { color: var(--muted); font-size: 0.85rem; }
+.outlook-verdict small { display: block; color: var(--muted); font-size: 0.75rem; margin-top: 0.1rem; }
+
+.outlook-note { color: var(--muted); font-size: 0.82rem; }
+
+.count-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--grid);
+}
+
+.count-bar span[data-tone="positive"] { background: var(--up); }
+.count-bar span[data-tone="negative"] { background: var(--down); }
+.count-bar span[data-tone="neutral"] { background: var(--border-strong); }
+.outlook-counts p { color: var(--muted); font-size: 0.78rem; margin-top: 0.4rem; }
+
+.outlook-text h3 { font-size: 0.98rem; font-weight: 600; line-height: 1.45; }
+.outlook-text > p { font-size: 0.88rem; line-height: 1.6; margin-top: 0.35rem; }
+
+.outlook-factors { margin-top: 0.7rem; }
+.outlook-factors h3 { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.outlook-factors[data-side="bull"] h3 { color: var(--up); }
+.outlook-factors[data-side="bear"] h3 { color: var(--down); }
+.outlook-factors ul { list-style: none; margin-top: 0.3rem; display: grid; gap: 0.3rem; }
+.outlook-factors li { font-size: 0.85rem; line-height: 1.5; padding-left: 0.8rem; position: relative; }
+.outlook-factors li::before { content: "•"; position: absolute; left: 0; color: var(--muted); }
+
+.cite {
+  margin-left: 0.25rem;
+  color: var(--accent);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.72rem;
+  text-decoration: none;
+}
+
+.cite:hover { text-decoration: underline; }
+
+.outlook-sources {
+  list-style: none;
+  display: grid;
+  gap: 0.55rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+}
+
+.outlook-sources li {
+  display: grid;
+  grid-template-columns: 1.3rem 8px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  scroll-margin-top: 0.5rem;
+}
+
+.outlook-sources li:target { background: var(--grid); border-radius: 6px; }
+.outlook-sources a { color: var(--foreground); text-decoration: none; }
+.outlook-sources a:hover { text-decoration: underline; }
+.outlook-sources small { display: block; color: var(--muted); font-size: 0.7rem; }
+.source-num { color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 0.72rem; }
 
 .news-tone {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--muted);
+  align-self: center;
 }
 
 .news-tone[data-tone="positive"] { background: var(--up); }
 .news-tone[data-tone="negative"] { background: var(--down); }
 
-.news-summary { font-size: 0.9rem; line-height: 1.5; }
-.news-why { color: var(--muted); font-size: 0.8rem; line-height: 1.45; }
-
-.news-headline {
-  color: var(--foreground);
-  font-size: 0.78rem;
-  line-height: 1.4;
-  opacity: 0.8;
-  text-decoration: none;
-}
-
-a.news-headline:hover { text-decoration: underline; opacity: 1; }
-
-.news-footer {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.25rem 0.75rem;
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-
-.news-reaction { font-family: var(--font-geist-mono), monospace; display: inline-flex; gap: 0.6rem; }
-.news-reaction[data-state="waiting"] { font-family: inherit; }
-
-.news-empty { color: var(--muted); font-size: 0.85rem; padding: 1rem; }
-
-.news-more {
-  margin: 0.5rem 1rem 0;
-  padding: 0.4rem;
-  background: transparent;
-  border: 1px dashed var(--border-strong);
-  border-radius: 8px;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-
-.news-more:hover { color: var(--foreground); }
+.outlook-footer { color: var(--muted); font-size: 0.7rem; }
 
 @media (max-width: 900px) {
   .main-grid { grid-template-columns: minmax(0, 1fr); }
-  .news-panel { height: auto; min-height: 0; max-height: 70vh; }
+  .outlook-card { height: auto; min-height: 0; max-height: 80vh; }
 }

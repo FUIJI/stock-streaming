@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import CandlestickChart from "@/components/CandlestickChart";
 import IntervalSelector from "@/components/IntervalSelector";
 import MarketStatusBadge from "@/components/MarketStatusBadge";
-import NewsPanel from "@/components/NewsPanel";
+import OutlookCard from "@/components/OutlookCard";
 import QuoteCards from "@/components/QuoteCards";
 import { usePolling } from "@/hooks/usePolling";
 import { useTheme } from "@/hooks/useTheme";
@@ -83,7 +83,7 @@ export default function Home() {
           theme={theme}
           toolbar={<IntervalSelector value={interval} onChange={setChartInterval} />}
         />
-        <NewsPanel symbol={symbol} />
+        <OutlookCard symbol={symbol} />
       </div>
     </main>
   );
