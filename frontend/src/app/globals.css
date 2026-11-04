@@ -443,6 +443,7 @@ body {
 .news-tone[data-tone="negative"] { background: var(--down); }
 
 .outlook-footer { color: var(--muted); font-size: 0.7rem; }
+.outlook-accuracy { display: block; margin-top: 0.2rem; color: var(--foreground); }
 
 @media (max-width: 900px) {
   .main-grid { grid-template-columns: minmax(0, 1fr); }

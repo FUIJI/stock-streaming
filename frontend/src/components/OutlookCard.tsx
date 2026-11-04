@@ -3,13 +3,14 @@
 import { useCallback } from "react";
 
 import { usePolling } from "@/hooks/usePolling";
-import { fetchDigest } from "@/lib/api";
+import { fetchAccuracy, fetchDigest } from "@/lib/api";
 import {
   type Bullet,
   CONFIDENCE_LABELS,
   type Counts,
   type Digest,
   OUTLOOK_LABELS,
+  accuracyLine,
   countShares,
   formatCardTime,
   numberSources,
@@ -64,7 +65,7 @@ function Factors({ title, side, bullets, index }: {
   );
 }
 
-function CardBody({ digest }: { digest: Digest }) {
+function CardBody({ digest, accuracy }: { digest: Digest; accuracy: string | null }) {
   const { card, live } = digest;
   const { sources, index } = numberSources(digest);
   return (
@@ -124,6 +125,7 @@ function CardBody({ digest }: { digest: Digest }) {
       <p className="outlook-footer">
         {card ? `AI outlook · ${card.model} · updated ${formatCardTime(card.created_at)} · ` : ""}
         From news only — not investment advice.
+        {accuracy && <span className="outlook-accuracy">{accuracy}</span>}
       </p>
     </>
   );
@@ -132,6 +134,7 @@ function CardBody({ digest }: { digest: Digest }) {
 export default function OutlookCard({ symbol }: { symbol: string }) {
   const load = useCallback(() => fetchDigest(symbol), [symbol]);
   const digest = usePolling(load, 60_000);
+  const accuracy = usePolling(fetchAccuracy, 30 * 60_000);
   // usePolling keeps the previous symbol's card until the new one loads; don't show it.
   const data = digest.data?.symbol === symbol ? digest.data : null;
   return (
@@ -142,7 +145,7 @@ export default function OutlookCard({ symbol }: { symbol: string }) {
       </header>
       <div className="outlook-scroll">
         {data ? (
-          <CardBody digest={data} />
+          <CardBody digest={data} accuracy={accuracyLine(accuracy.data)} />
         ) : (
           <p className="outlook-note">{digest.failed ? "Outlook unavailable right now." : "Loading…"}</p>
         )}

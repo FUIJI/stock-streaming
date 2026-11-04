@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { type Digest, countShares, formatCardTime, numberSources, sourceTitle } from "./digest.ts";
+import {
+  type Digest, accuracyLine, countShares, formatCardTime, numberSources, sourceTitle,
+} from "./digest.ts";
 
 function source(id: number, th: string | null = null) {
   return { id, headline: `News ${id}`, headline_th: th, source: "benzinga", url: null,
@@ -44,4 +46,11 @@ test("titles prefer Thai; times are Thai time", () => {
   assert.equal(sourceTitle(source(2, "หัวข่าว")), "หัวข่าว");
   assert.equal(sourceTitle(source(1)), "News 1");
   assert.equal(formatCardTime("2026-11-04T03:25:00Z"), "4 Nov, 10:25");
+});
+
+test("accuracy shows only with enough judged cards", () => {
+  assert.equal(accuracyLine(null), null);
+  assert.equal(accuracyLine({ evaluated: 19, hits: 10, rate: 0.53, baseline_rate: 0.5 }), null);
+  assert.equal(accuracyLine({ evaluated: 34, hits: 20, rate: 0.588, baseline_rate: 0.51 }),
+    "Past outlooks: 59% right (naive guess 51%) · 34 judged");
 });
