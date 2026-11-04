@@ -110,6 +110,7 @@ Alpaca News ─► news (pending)                                   [poller เ�
 - ✅ test: ชุดข่าวไม่เปลี่ยน → ไม่สร้างงาน · ข่าวเกิน 72 ชม. หลุดออก · ตัดที่ 10 ข่าว (เรียงคะแนน) · relevance < 0.5 ไม่เข้า · ตัวเลขดี/ร้าย/ราคาถูก · อ้าง id ที่ไม่มี → output เสีย
 
 ### D5 — API
+> **เสร็จ** · `GET /digest?symbol=` คืน `card` (การ์ดล่าสุดภายใน 72 ชม. หรือ `null`), `card_is_current` (การ์ดเขียนจากชุดข่าวเดียวกับตอนนี้ไหม), `live` (ตัวเลขดี/ร้าย/ราคาคำนวณใหม่ทุกครั้ง) และ `sources` (ทุกข่าวที่การ์ดอ้าง + ชุดข่าวปัจจุบัน) · `GET /digest/accuracy` อ่านผล `hit` (จะมีข้อมูลหลัง D11) · `/health.llm.calls_since_start` แยก triage / outlook
 - `GET /digest?symbol=NVDA` การ์ดล่าสุด: ตัวเลข, ข้อความ, outlook, confidence, เวลา, model และ **แหล่งข่าว** (id, `headline_th` หรืออังกฤษ, source, เวลา, url, sentiment) · ถ้า AI ยังไม่เคยสร้าง/พัง คืนตัวเลข + แหล่งข่าวโดยไม่มีข้อความ (D-Q9b)
 - `GET /digest/accuracy?symbol=` ผลจาก D11 (รวม และแยก confidence)
 - `/health.llm` เพิ่มจำนวน call แยก triage/digest และ `digest_jobs` ที่ค้าง

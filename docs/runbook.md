@@ -186,6 +186,7 @@ dc run --rm api python -m src.backfill --days 5
 | ข่าวที่ถูกกฎข้าม (`skipped`) | ดูได้ที่ `/news?include_skipped=true` (มี `skip_reason`) · แก้กฎใน `api/src/news/rules.py` หรือ `NEWS_MAX_TAGS` แล้ว `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --rerun-rules` |
 | วัดคุณภาพการให้คะแนน (หลังแก้ prompt/เปลี่ยนโมเดล) | ดู `api/tests/news_eval/README.md` · `dc run --rm -T api python -m src.news.eval --runs 2 < api/tests/news_eval/cases.json` |
 | การ์ดแนวโน้มรายหุ้น (D4) | เขียนเองทุกรอบ `DIGEST_TIMES_ET` เฉพาะหุ้นที่ข่าวเปลี่ยน · ลองทันที (ไม่บันทึก): `dc run --rm api python -m src.news.digest --symbol NVDA --dry-run` · งานที่ค้าง: `/health` → `llm.outlooks_queued` |
+| ดูการ์ดที่หน้าเว็บจะได้ | `curl -s "https://api.fuiji-stock.duckdns.org/digest?symbol=AAPL" \| python3 -m json.tool` (`card: null` = ยังไม่มีการ์ด · `live` = ตัวเลขตอนนี้) |
 | ปิดการสรุปข่าวชั่วคราว | `LLM_PROVIDER=off` ใน `.env` แล้ว `dc up -d api` (ข่าวยังเข้ามาและแสดงเป็นภาษาอังกฤษ) |
 
 ---
