@@ -24,15 +24,15 @@ NOW = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=5)
 
 
 async def article(pool, news_id, hours_ago, importance=4, relevance=0.9, sentiment=0.5,
-                  symbol="NVDA", status="done"):
+                  symbol="NVDA", status="done", category="analyst"):
     t = (NOW - timedelta(hours=hours_ago)).isoformat()
     await save_articles(pool, [Article.from_alpaca(
         {"id": news_id, "headline": f"News {news_id}", "summary": "s", "symbols": [symbol],
          "created_at": t, "updated_at": t})], False)
     await pool.execute(
         "INSERT INTO news_ai (news_id, headline_th, category, importance, importance_raw,"
-        " is_market_wide, model, prompt_version) VALUES ($1, 'หัวข่าว', 'analyst', $2, $2,"
-        " false, 'gemma', 't3')", news_id, importance)
+        " is_market_wide, model, prompt_version) VALUES ($1, 'หัวข่าว', $3, $2, $2,"
+        " false, 'gemma', 't3')", news_id, importance, category)
     await pool.execute("INSERT INTO news_symbols VALUES ($1, $2, $3, $4)",
                        news_id, symbol, relevance, sentiment)
     await pool.execute("UPDATE news SET ai_status = $2 WHERE id = $1", news_id, status)
@@ -262,3 +262,41 @@ async def test_an_unavailable_translator_retries_the_whole_card_later():
     inputs.price_change_pct, inputs.reaction_m30 = None, {}
     with pytest.raises(LLMError):
         await write_outlook(managed(card(1), busy), inputs, "NVIDIA")
+
+
+async def test_one_earnings_release_counts_once(pg_pool):
+    # Shaped like AAPL on the VM: EPS beat, "tops expectations", transcript, "record
+    # results" within ~2.5h, plus three separate broker notes and an antitrust story.
+    await migrate(pg_pool)
+    await article(pg_pool, 1, hours_ago=20.0, importance=5, sentiment=1.0, category="earnings")
+    await article(pg_pool, 2, hours_ago=19.7, importance=5, sentiment=1.0, category="earnings")
+    await article(pg_pool, 3, hours_ago=18.4, importance=5, sentiment=0.0, category="earnings")
+    await article(pg_pool, 4, hours_ago=17.5, importance=5, sentiment=1.0, category="earnings")
+    await article(pg_pool, 5, hours_ago=6, sentiment=0.0)
+    await article(pg_pool, 6, hours_ago=7, sentiment=0.6)
+    await article(pg_pool, 7, hours_ago=8, sentiment=0.6)
+    await article(pg_pool, 8, hours_ago=9, importance=5, sentiment=-0.9,
+                  category="legal_regulatory")
+    inputs = await gather(pg_pool, "NVDA", NOW)
+    ids = [a["id"] for a in inputs.articles]
+    assert ids == [8, 1, 5, 6, 7]  # one earnings article (the earliest strong one)
+    assert inputs.folded == {1: [2, 3, 4]}
+    assert inputs.counts == {"positive": 3, "negative": 1, "neutral": 1}  # was 5 / 1 / 2
+
+
+def test_bursts_are_split_by_the_window_and_by_category():
+    from src.news.digest import collapse_duplicates
+
+    def a(i, hours, category="earnings", importance=4, sentiment=0.5):
+        return {"id": i, "created_at": NOW - timedelta(hours=hours), "category": category,
+                "importance": importance, "sentiment": sentiment}
+
+    kept, folded = collapse_duplicates([
+        a(1, 40), a(2, 35),                       # same burst (5h apart)
+        a(3, 20),                                 # 20h after #1: a new burst
+        a(4, 19, category="guidance"),            # other category: its own burst
+        a(5, 18, importance=5),                   # joins #3's burst and wins (importance)
+        a(6, 30, category="analyst"), a(7, 29, category="analyst"),  # never clustered
+    ])
+    assert sorted(k["id"] for k in kept) == [1, 4, 5, 6, 7]
+    assert folded == {1: [2], 5: [3]}

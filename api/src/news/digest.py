@@ -45,8 +45,42 @@ SELECT_SQL = f"""
       AND n.ai_status <> 'skipped'
       AND s.relevance >= {RELEVANCE_THRESHOLD} AND a.importance >= {MIN_IMPORTANCE}
     ORDER BY a.importance DESC, n.created_at DESC
-    LIMIT {MAX_ARTICLES}
+    LIMIT {MAX_ARTICLES * 4}
 """
+
+# One earnings release arrives as 3-5 articles (EPS line, "tops expectations", the CEO
+# quote, the transcript...). Without this they took 4 of the 10 slots and were counted as
+# 4 good news. Analyst notes are NOT clustered: different brokers are different events.
+CLUSTER_CATEGORIES = {"earnings", "guidance"}
+CLUSTER_WINDOW = timedelta(hours=12)
+
+
+def collapse_duplicates(articles: list[dict]) -> tuple[list[dict], dict[int, list[int]]]:
+    """One article per same-category burst (CLUSTER_CATEGORIES within CLUSTER_WINDOW of
+    the burst's first article): the most important, then the strongest sentiment, then
+    the earliest. Returns (kept, {kept id: [ids folded into it]})."""
+    kept: list[dict] = []
+    folded: dict[int, list[int]] = {}
+    clusters: dict[str, list[list[dict]]] = {}
+    for a in sorted(articles, key=lambda a: a["created_at"]):
+        if a["category"] not in CLUSTER_CATEGORIES:
+            kept.append(a)
+            continue
+        groups = clusters.setdefault(a["category"], [])
+        if groups and a["created_at"] - groups[-1][0]["created_at"] <= CLUSTER_WINDOW:
+            groups[-1].append(a)
+        else:
+            groups.append([a])
+    for groups in clusters.values():
+        for group in groups:
+            best = min(group, key=lambda a: (-a["importance"], -abs(a["sentiment"]),
+                                             a["created_at"]))
+            kept.append(best)
+            others = [a["id"] for a in group if a is not best]
+            if others:
+                folded[best["id"]] = others
+    kept.sort(key=lambda a: (-a["importance"], -a["created_at"].timestamp()))
+    return kept[:MAX_ARTICLES], folded
 
 # Close of the last candle before the first article, and the latest close up to now.
 PRICE_SQL = """
@@ -67,6 +101,7 @@ class Inputs:
     period_start: datetime
     period_end: datetime
     reaction_m30: dict[int, float | None] = field(default_factory=dict)
+    folded: dict[int, list[int]] = field(default_factory=dict)  # duplicates left out
 
     @property
     def news_ids(self) -> list[int]:
@@ -88,7 +123,8 @@ def pct(before: float | None, after: float | None) -> float | None:
 
 
 async def gather(pool: asyncpg.Pool, symbol: str, now: datetime) -> Inputs:
-    articles = [dict(r) for r in await pool.fetch(SELECT_SQL, symbol, now)]
+    articles, folded = collapse_duplicates(
+        [dict(r) for r in await pool.fetch(SELECT_SQL, symbol, now)])
     start = min((a["created_at"] for a in articles), default=now)
     price = await pool.fetchrow(PRICE_SQL, symbol, start, now)
     moves = await reactions(pool, [(a["id"], symbol, a["created_at"]) for a in articles], now)
@@ -96,7 +132,8 @@ async def gather(pool: asyncpg.Pool, symbol: str, now: datetime) -> Inputs:
         symbol=symbol, articles=articles, counts=count_tones(articles),
         price_change_pct=pct(price["before"], price["latest"]), price_now=price["latest"],
         period_start=now - WINDOW, period_end=now,
-        reaction_m30={a["id"]: moves.get((a["id"], symbol), {}).get("m30") for a in articles})
+        reaction_m30={a["id"]: moves.get((a["id"], symbol), {}).get("m30") for a in articles},
+        folded={k: v for k, v in folded.items() if any(a["id"] == k for a in articles)})
 
 
 # --- what the model writes ---------------------------------------------------------
@@ -381,8 +418,9 @@ async def _cli(symbol: str, dry_run: bool) -> None:
         print(f"{symbol}: {len(inputs.articles)} articles · {inputs.counts} · "
               f"price {inputs.price_change_pct}%")
         for a in inputs.articles:
+            also = inputs.folded.get(a["id"])
             print(f"  [{a['id']}] imp {a['importance']} sent {a['sentiment']:+.1f} · "
-                  f"{a['headline'][:80]}")
+                  f"{a['headline'][:80]}" + (f"  (+{len(also)} same story: {also})" if also else ""))
         if not inputs.articles:
             return
         company = (await company_names(pool)).get(symbol, symbol)
