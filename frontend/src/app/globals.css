@@ -479,4 +479,3 @@ body {
   .main-grid { grid-template-columns: minmax(0, 1fr); }
   .outlook-card { height: auto; min-height: 0; max-height: 80vh; }
 }
-
