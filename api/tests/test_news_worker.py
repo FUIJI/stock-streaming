@@ -186,3 +186,45 @@ async def test_rate_limits_pause_the_worker_without_spending_attempts(pg_pool):
     outcome = await run(pg_pool, managed(limited))
     assert outcome.pause_until == NOW + timedelta(minutes=1)
     assert (await status(pg_pool, 1))["ai_attempts"] == 0
+
+
+class Recorder:
+    def __init__(self):
+        self.alerts = []
+
+    async def notify(self, alert):
+        self.alerts.append(alert)
+
+
+async def test_important_news_is_handed_to_the_notifier_once(pg_pool):
+    await migrate(pg_pool)
+    await save_articles(pg_pool, [article(1, 5)], False)
+    await save_articles(pg_pool, [article(2, 4)], True)  # backfill: never alerted
+    await save_articles(pg_pool, [article(3, 3)], False)
+    recorder = Recorder()
+
+    async def go(provider):
+        return await process_once(pg_pool, provider, {"AAPL"}, {}, 1, "t3", now=NOW,
+                                  notifier=recorder)
+
+    await go(managed(answer(3, importance=2)))  # newest first: not important
+    await go(managed(answer(2, importance=5)))
+    await go(managed(answer(1, importance=4)))
+    assert [(a.news_id, a.importance, a.symbols) for a in recorder.alerts] == [(1, 4, ["AAPL"])]
+    assert recorder.alerts[0].headline_th == "หัวข่าว 1"
+
+    await reset(pg_pool, NOW - timedelta(days=1), "done", None)  # e.g. a new prompt
+    await go(managed(answer(1, importance=5)))
+    assert len(recorder.alerts) == 1  # re-scored: no second alert
+
+
+async def test_a_failing_notifier_does_not_lose_the_result(pg_pool):
+    class Broken:
+        async def notify(self, alert):
+            raise RuntimeError("telegram down")
+
+    await migrate(pg_pool)
+    await save_articles(pg_pool, [article(1, 5)], False)
+    outcome = await process_once(pg_pool, managed(answer(1, importance=5)), {"AAPL"}, {}, 1,
+                                 "t3", now=NOW, notifier=Broken())
+    assert outcome.done == 1 and (await status(pg_pool, 1))["ai_status"] == "done"

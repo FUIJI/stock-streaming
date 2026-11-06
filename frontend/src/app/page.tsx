@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import CandlestickChart from "@/components/CandlestickChart";
 import IntervalSelector from "@/components/IntervalSelector";
 import MarketStatusBadge from "@/components/MarketStatusBadge";
+import NewsAlerts from "@/components/NewsAlerts";
 import OutlookCard from "@/components/OutlookCard";
 import QuoteCards from "@/components/QuoteCards";
 import { usePolling } from "@/hooks/usePolling";
@@ -50,6 +51,7 @@ export default function Home() {
         </div>
         <div className="header-actions">
           <MarketStatusBadge status={market.data} failed={market.failed} />
+          <NewsAlerts onSelect={setChosen} />
           <button
             type="button"
             className="theme-toggle"

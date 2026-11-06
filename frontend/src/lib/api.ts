@@ -71,3 +71,8 @@ export function fetchDigest(symbol: string): Promise<Digest> {
 }
 
 export const fetchAccuracy = () => getJson<Accuracy>("/digest/accuracy");
+
+/** Important articles for every tracked symbol, for alerts (D7). */
+export function fetchImportantNews(): Promise<NewsItem[]> {
+  return getJson(`/news?${new URLSearchParams({ min_importance: "4", limit: "50" })}`);
+}

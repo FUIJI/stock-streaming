@@ -18,6 +18,7 @@ from .analyzer import analyze
 from .digest_jobs import enqueue_round, latest_round, process_digest_once, round_times
 from .llm import LLMError
 from .managed import ManagedProvider, QuotaExhausted
+from .notify import ALERT_IMPORTANCE, Alert, Notifier, notifier_from_env
 from .store import company_names, to_item
 
 log = logging.getLogger("api.news.worker")
@@ -108,7 +109,8 @@ async def _record_failure(pool: asyncpg.Pool, row, error: LLMError, now: datetim
 async def process_once(pool: asyncpg.Pool, provider: ManagedProvider, tracked: set[str],
                        names: dict[str, str], batch_size: int, prompt_version: str,
                        now: datetime | None = None,
-                       batch_wait: timedelta = timedelta(0)) -> Outcome:
+                       batch_wait: timedelta = timedelta(0),
+                       notifier: Notifier | None = None) -> Outcome:
     now = now or datetime.now(UTC)
     rows = await pool.fetch(QUEUE_SQL, now, batch_size)
     if not rows:
@@ -129,10 +131,27 @@ async def process_once(pool: asyncpg.Pool, provider: ManagedProvider, tracked: s
         return Outcome(processed=0, pause_until=now + CONFIG_ERROR_PAUSE)
 
     stored = 0
+    alerts: list[Alert] = []
+    # Alert once per article: one that already had a result was alerted (or not) back then.
+    scored_before = {r["news_id"] for r in await pool.fetch(
+        "SELECT news_id FROM news_ai WHERE news_id = ANY($1::bigint[])", [r["id"] for r in rows])}
     async with pool.acquire() as conn:
         for row in rows:
-            if row["id"] in result.done:
-                stored += await _store(conn, row, result.done[row["id"]], prompt_version)
+            final = result.done.get(row["id"])
+            if final is None or not await _store(conn, row, final, prompt_version):
+                continue
+            stored += 1
+            if (final.importance >= ALERT_IMPORTANCE and not row["backfilled"]
+                    and row["id"] not in scored_before):
+                alerts.append(Alert(
+                    news_id=row["id"], importance=final.importance,
+                    symbols=[a.symbol for a in final.per_symbol], headline=row["headline"],
+                    headline_th=final.analysis.headline_th, url=row["url"]))
+    for alert in alerts:
+        try:
+            await (notifier or notifier_from_env()).notify(alert)
+        except Exception:
+            log.exception("Notifier failed for %s", alert.news_id)
     for row in rows:
         if row["id"] in result.failed:
             await _record_failure(pool, row, result.failed[row["id"]], now)
