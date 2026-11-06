@@ -58,6 +58,9 @@ services:
       INGEST_TOKEN: ${INGEST_TOKEN:?set INGEST_TOKEN in .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
+      WS_MAX_CONNECTIONS: ${WS_MAX_CONNECTIONS:-200}
+      WS_MAX_PER_IP: ${WS_MAX_PER_IP:-10}
       # Market calendar, quotes, nightly reconcile and the one-shot backfill/jobs
       ALPACA_API_KEY: ${ALPACA_API_KEY:-}
       ALPACA_API_SECRET: ${ALPACA_API_SECRET:-}
@@ -77,11 +80,16 @@ services:
       # articles wait up to 45s for company. Lower the batch if Gemma's answers break.
       LLM_TRIAGE_BATCH: ${LLM_TRIAGE_BATCH:-25}
       LLM_TRIAGE_WAIT_SEC: ${LLM_TRIAGE_WAIT_SEC:-45}
+      LLM_MAX_TOKENS_BASE: ${LLM_MAX_TOKENS_BASE:-1024}
+      LLM_MAX_TOKENS_PER_ARTICLE: ${LLM_MAX_TOKENS_PER_ARTICLE:-200}
+      NEWS_WORKER_IDLE_SEC: ${NEWS_WORKER_IDLE_SEC:-15}
       LLM_DAILY_CALL_LIMIT: ${LLM_DAILY_CALL_LIMIT:-200}
       # Outlook cards (D4): rounds in New York time; triage stops this many calls short
       # of the daily cap so the cards can still be written.
       DIGEST_TIMES_ET: ${DIGEST_TIMES_ET:-08:45,12:30,16:30}
       LLM_DIGEST_RESERVE: ${LLM_DIGEST_RESERVE:-60}
+      LLM_DIGEST_MAX_TOKENS: ${LLM_DIGEST_MAX_TOKENS:-2048}
+      LLM_TRANSLATE_MAX_TOKENS: ${LLM_TRANSLATE_MAX_TOKENS:-2048}
       # D11: a 3-session move within ±this % counts as "mixed" when judging outlooks
       OUTLOOK_FLAT_PCT: ${OUTLOOK_FLAT_PCT:-1.0}
       # A full batch is ~5.5K tokens and Gemma's free tier allows 16K tokens/minute.

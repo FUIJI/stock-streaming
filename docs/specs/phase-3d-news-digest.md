@@ -137,6 +137,7 @@ Alpaca News ─► news (pending)                                   [poller เ�
 - UI: การ์ดบนหน้าแรกเหนือกราฟ กดแล้วสลับไปหุ้นนั้น
 
 ### D10 — Docs + config (เดิม N10)
+> **เสร็จ** · ทุก env ของข่าว/AI อยู่ใน `.env.example` + `deploy/env.vm.example` พร้อมคำอธิบายและค่าเริ่มต้น · `docker-compose.prod.yml` ส่งต่อครบทุกตัว (เดิม 7 ตัวตั้งใน `.env` แล้วไม่ถึง container) · `api/tests/test_env_docs.py` กันลืมในอนาคต · runbook: ตั้งค่าครั้งแรก, ขั้นตอนของข่าว, ตารางอ่าน error ที่เจอบ่อย
 - runbook: env ใหม่ทั้งหมด, `reprocess --status skipped`, `digest --symbol`, eval, อ่าน `/health.llm`
 - `.env.example` / `deploy/env.vm.example` / `docker-compose.prod.yml`: `LLM_TRIAGE_BATCH`, `LLM_TRIAGE_WAIT_SEC`, `NEWS_MAX_TAGS`, `DIGEST_TIMES_ET`, `LLM_DIGEST_RESERVE`, `GEMINI_API_KEY` ฯลฯ
 

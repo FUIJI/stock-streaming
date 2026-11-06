@@ -168,19 +168,33 @@ dc run --rm api python -m src.backfill --days 5
 
 ---
 
-### ข่าว + LLM (Phase 3c)
+### ข่าว + LLM (Phase 3c / 3d)
+
+**ตั้งค่าครั้งแรก:** สร้าง key ฟรีที่ https://aistudio.google.com → Get API key (อย่ากด Set up billing) · ใส่ `GEMINI_API_KEY=` ใน `.env` แล้ว `dc up -d api` · ค่าอื่นทั้งหมดมีค่าเริ่มต้นแล้ว ดูคำอธิบายแต่ละตัวใน `deploy/env.vm.example` (หมวด News + AI) · ไม่มี key = ข่าวยังเข้ามาและแสดงเป็นภาษาอังกฤษ
+
+ขั้นตอนของข่าว: Alpaca → กฎกรอง (`skipped`) → AI ให้คะแนนเป็นชุด (triage) → การ์ดแนวโน้มรายหุ้น วันละ 3 รอบ → ตัดสินความแม่นทุกคืน
 
 ใน `curl -s https://api.fuiji-stock.duckdns.org/health`:
 - `news.last_poll_at` = ดึงข่าวจาก Alpaca สำเร็จล่าสุด (ทุก 60 วินาที)
-- `llm.pending / done / failed` = คิวสรุปข่าว · `llm.calls_today / daily_limit` = โควตาของเราเอง
-- `llm.last_error` = error ล่าสุดของ LLM · `llm.paused_until` = worker หยุดรอ (โควตาหมด หรือ key ผิด)
+- `llm.pending / done / failed / skipped` = คิวให้คะแนนข่าว · `llm.calls_today / daily_limit` = โควตาของเราเอง
+- `llm.outlooks_queued` = การ์ดแนวโน้มที่รอเขียน · `llm.calls_since_start` = จำนวน call แยก triage / outlook
+- `llm.last_error` = error ล่าสุดของ LLM · `llm.paused_until` = worker หยุดรอ (โควตาหมด, 429, หรือ key ผิด)
+
+อ่าน error ที่เจอบ่อย:
+| ข้อความ | ความหมาย | ทำอะไร |
+|---|---|---|
+| `Gemini 503 ... high demand` / `Gemini 500` | Google ล้น ไม่ใช่ปัญหาของเรา | ไม่ต้องทำ worker ลองใหม่เอง (1, 5, 30 นาที) |
+| `Gemini 429: quota exceeded: ...input_token_count, limit: 16000` | key เกินเพดานต่อนาทีของ Gemma | ไม่ต้องทำ worker หยุด 1 นาทีเอง · ถ้าบ่อย ลด `LLM_TRIAGE_BATCH` หรือ `LLM_RPM_LIMIT` |
+| `withheld the answer (RECITATION)` | Google ไม่ส่งคำตอบเพราะคล้ายต้นฉบับ | worker ลองใหม่เอง · ถ้าบ่อยเป็นเรื่องของ prompt |
+| `hit the output token limit (... ends with: ...ซ้ำ ๆ)` | โมเดลเขียนวนซ้ำ | ลองใหม่เอง · ถ้าบ่อยเป็นเรื่องของ prompt |
+| `Gemini 400 ... API key not valid` | key ผิด/ถูกลบ | ใส่ key ใหม่ใน `.env` แล้ว `dc up -d api` |
 
 | งาน | วิธี |
 |---|---|
 | ลอง LLM กับข่าวล่าสุด (ไม่เขียนฐานข้อมูล) | `dc run --rm api python -m src.news.smoke --limit 25` (1 ชุดเท่าที่ worker ส่งจริง · บรรทัดสุดท้ายบอกจำนวน call, การแบ่งครึ่ง, token, เวลา) |
 | Gemma ตอบชุดใหญ่ไม่ไหว (`batch splits` บ่อย) | ลด `LLM_TRIAGE_BATCH` ใน `.env` (เช่น 10) แล้ว `dc up -d api` |
 | เปลี่ยนโมเดลหลัก/สำรอง | แก้ `LLM_MODEL` / `LLM_FALLBACK_MODEL` ใน `.env` แล้ว `dc up -d api` |
-| สรุปข่าวใหม่หลังแก้ prompt | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --older-prompt t1` (ใส่เวอร์ชันใหม่ ข่าวที่สรุปด้วยเวอร์ชันนั้นแล้วจะไม่ถูกส่งซ้ำ) |
+| สรุปข่าวใหม่หลังแก้ prompt | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --older-prompt t3` (ใส่เวอร์ชันล่าสุดจาก `PROMPT_VERSION` ใน `api/src/news/analysis.py` ข่าวที่สรุปด้วยเวอร์ชันนั้นแล้วจะไม่ถูกส่งซ้ำ) |
 | ส่งข่าวที่ failed ไปลองใหม่ | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --status failed` |
 | สรุปใหม่เฉพาะข่าวที่ผลเสีย (เพิ่มตัวตรวจใหม่แล้ว) | `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --recheck` (ตรวจสรุปที่เก็บไว้ด้วยกฎปัจจุบัน ส่งเฉพาะข่าวที่ไม่ผ่าน) |
 | ข่าวที่ถูกกฎข้าม (`skipped`) | ดูได้ที่ `/news?include_skipped=true` (มี `skip_reason`) · แก้กฎใน `api/src/news/rules.py` หรือ `NEWS_MAX_TAGS` แล้ว `dc run --rm api python -m src.news.reprocess --since 2026-11-01 --rerun-rules` |
