@@ -56,6 +56,11 @@ export function fetchCandles(symbol: string, interval: Interval, limit = 300): P
   return getJson(`/candles?${params}`);
 }
 
+/** Scored articles worth a chart marker (importance >= 3), newest 200 (D8). */
+export function fetchMarkerNews(symbol: string): Promise<NewsItem[]> {
+  return getJson(`/news?${new URLSearchParams({ symbol, min_importance: "3", limit: "200" })}`);
+}
+
 export const fetchQuotes = () => getJson<Quote[]>("/quotes");
 export const fetchMarketStatus = () => getJson<MarketStatus>("/market/status");
 export const fetchSymbolDetails = () => getJson<SymbolInfo[]>("/symbols/details");

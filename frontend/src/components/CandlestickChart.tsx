@@ -6,14 +6,20 @@ import {
   HistogramData,
   HistogramSeries,
   ISeriesApi,
+  ISeriesMarkersPluginApi,
+  SeriesMarker,
   Time,
   UTCTimestamp,
   createChart,
+  createSeriesMarkers,
 } from "lightweight-charts";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
+import { usePolling } from "@/hooks/usePolling";
 import { type StreamStatus, type Trade, useTradeStream } from "@/hooks/useTradeStream";
-import { type Candle, type Interval, type Session, fetchCandles } from "@/lib/api";
+import { type Candle, type Interval, type Session, fetchCandles, fetchMarkerNews } from "@/lib/api";
+import { type NewsMarker, buildMarkers } from "@/lib/markers";
+import { formatNewsTime } from "@/lib/news";
 import {
   type Ohlc,
   barSession,
@@ -32,6 +38,7 @@ interface Palette {
   text: string;
   grid: string;
   border: string;
+  neutral: string;
 }
 
 function withAlpha(hex: string, alpha: number) {
@@ -56,10 +63,46 @@ function readPalette(): Palette {
     text: v("--muted"),
     grid: v("--grid"),
     border: v("--border"),
+    neutral: v("--extended"),
   };
 }
 
 type LoadState = "loading" | "ready" | "empty" | "error";
+
+interface Tip {
+  x: number;
+  y: number;
+  marker: NewsMarker;
+}
+
+function toSeriesMarkers(markers: NewsMarker[], p: Palette): SeriesMarker<Time>[] {
+  const color = { positive: p.up, negative: p.down, neutral: p.neutral };
+  return markers.map((m) => ({
+    time: m.time as UTCTimestamp,
+    position: "aboveBar",
+    shape: "circle",
+    color: color[m.tone],
+    size: m.big ? 2 : 1,
+  }));
+}
+
+function NewsTip({ tip }: { tip: Tip }) {
+  const shown = tip.marker.items.slice(0, 3);
+  const more = tip.marker.items.length - shown.length;
+  return (
+    <div className="chart-tip" style={{ left: tip.x, top: tip.y }} role="tooltip">
+      {shown.map((n) => (
+        <p key={n.id}>
+          <span className="chart-tip-meta">
+            {n.ai?.importance}/5 · {formatNewsTime(n.created_at)}
+          </span>
+          <span lang="th">{n.ai?.headline_th || n.headline}</span>
+        </p>
+      ))}
+      {more > 0 && <p className="chart-tip-meta">+{more} more</p>}
+    </div>
+  );
+}
 
 function toOhlc(c: Candle): Ohlc {
   return {
@@ -118,6 +161,12 @@ export default function CandlestickChart({
   const paletteRef = useRef<Palette | null>(null);
   const [lastPrice, setLastPrice] = useState<number | null>(null);
   const [load, setLoad] = useState<LoadState>("loading");
+  const markersApiRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const markersRef = useRef<Map<number, NewsMarker>>(new Map());
+  const [candleTimes, setCandleTimes] = useState<number[]>([]);
+  const [tip, setTip] = useState<Tip | null>(null);
+  const loadNews = useCallback(() => fetchMarkerNews(symbol), [symbol]);
+  const news = usePolling(loadNews, 60_000);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -161,6 +210,24 @@ export default function CandlestickChart({
       priceLineVisible: false,
     });
     chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    markersApiRef.current = createSeriesMarkers(candles, []);
+    markersRef.current = new Map();
+    setCandleTimes([]);
+    setTip(null);
+    // Pointing at a candle with news shows its headlines; clicking jumps to the article in
+    // the outlook card when it's one of its sources, else opens the original.
+    chart.subscribeCrosshairMove((param) => {
+      const marker = param.time === undefined ? undefined : markersRef.current.get(param.time as number);
+      setTip(marker && param.point ? { x: param.point.x, y: param.point.y, marker } : null);
+    });
+    chart.subscribeClick((param) => {
+      const marker = param.time === undefined ? undefined : markersRef.current.get(param.time as number);
+      const first = marker?.items[0];
+      if (!first) return;
+      const inCard = document.getElementById(`source-${first.id}`);
+      if (inCard) inCard.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (first.url) window.open(first.url, "_blank", "noopener,noreferrer");
+    });
     candlesRef.current = candles;
     volumeRef.current = volume;
     lastBarRef.current = null;
@@ -176,6 +243,7 @@ export default function CandlestickChart({
         candles.setData(drawn.map((d) => d.candle));
         volume.setData(drawn.map((d) => d.volume));
         lastBarRef.current = bars[bars.length - 1] ?? null;
+        setCandleTimes(bars.map((b) => b.time));
         setLastPrice(lastBarRef.current?.close ?? null);
         setLoad(bars.length ? "ready" : "empty");
         chart.timeScale().fitContent();
@@ -188,9 +256,19 @@ export default function CandlestickChart({
       cancelled = true;
       candlesRef.current = null;
       volumeRef.current = null;
+      markersApiRef.current = null;
       chart.remove();
     };
   }, [symbol, interval, theme]);
+
+  useEffect(() => {
+    const api = markersApiRef.current;
+    const palette = paletteRef.current;
+    if (!api || !palette) return;
+    const markers = buildMarkers(news.data ?? [], candleTimes, interval, symbol);
+    markersRef.current = new Map(markers.map((m) => [m.time, m]));
+    api.setMarkers(toSeriesMarkers(markers, palette));
+  }, [news.data, candleTimes, interval, symbol]);
 
   const stream = useTradeStream(symbol, (trade: Trade) => {
     const candles = candlesRef.current;
@@ -231,6 +309,7 @@ export default function CandlestickChart({
       </header>
       <div className="chart-body">
         <div ref={containerRef} className="chart-container" />
+        {tip && <NewsTip tip={tip} />}
         {load !== "ready" && (
           <p className="chart-overlay" data-state={load}>
             {load === "loading" && "Loading candles…"}
@@ -242,6 +321,9 @@ export default function CandlestickChart({
       </div>
       <footer className="chart-legend">
         <span>Times in ICT (UTC+7)</span>
+        <span>
+          <span className="legend-dot" /> News (importance 3+): point to read, click to open
+        </span>
         {interval !== "1d" && (
           <span>
             <span className="legend-swatch" /> Faded candles: pre-market / after-hours

@@ -317,6 +317,36 @@ body {
   gap: 1.25rem;
 }
 
+/* ---------- news markers on the chart (D8) ---------- */
+.chart-tip {
+  position: absolute;
+  z-index: 5;
+  transform: translate(12px, -50%);
+  width: min(300px, 70%);
+  padding: 0.55rem 0.7rem;
+  display: grid;
+  gap: 0.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.15);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.chart-tip p { display: grid; gap: 0.1rem; }
+.chart-tip-meta { color: var(--muted); font-size: 0.7rem; }
+
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--extended);
+  margin-right: 0.25rem;
+}
+
 /* ---------- news outlook card ---------- */
 .outlook-card {
   display: flex;
